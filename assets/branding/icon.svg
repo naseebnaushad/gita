@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1B2040"/>
+      <stop offset="100%" stop-color="#2E3568"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="28%" cy="22%" r="60%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="blueNode" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6C8CFF"/>
+      <stop offset="100%" stop-color="#3D5AFE"/>
+    </linearGradient>
+    <linearGradient id="tealNode" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3EEBCB"/>
+      <stop offset="100%" stop-color="#00BFA5"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle-approximation background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="192" ry="192" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="192" ry="192" fill="url(#glow)"/>
+
+  <!-- Git-graph merge lines -->
+  <path d="M 386 336 C 386 470 452 552 500 616" fill="none" stroke="#5B7FFF" stroke-width="54" stroke-linecap="round"/>
+  <path d="M 638 336 C 638 470 572 552 524 616" fill="none" stroke="#2FE0C4" stroke-width="54" stroke-linecap="round"/>
+
+  <!-- Two identity nodes -->
+  <circle cx="386" cy="336" r="62" fill="url(#blueNode)"/>
+  <circle cx="638" cy="336" r="62" fill="url(#tealNode)"/>
+
+  <!-- Resolved trunk node -->
+  <circle cx="512" cy="700" r="82" fill="#F3F5FF"/>
+
+  <!-- Verified badge -->
+  <circle cx="706" cy="770" r="96" fill="#1B2040"/>
+  <circle cx="706" cy="770" r="82" fill="#22C55E"/>
+  <path d="M 664 772 L 694 802 L 752 738" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

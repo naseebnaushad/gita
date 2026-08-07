@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 200" width="760" height="200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1B2040"/>
+      <stop offset="100%" stop-color="#2E3568"/>
+    </linearGradient>
+    <linearGradient id="blueNode" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6C8CFF"/>
+      <stop offset="100%" stop-color="#3D5AFE"/>
+    </linearGradient>
+    <linearGradient id="tealNode" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3EEBCB"/>
+      <stop offset="100%" stop-color="#00BFA5"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Mark -->
+  <g transform="translate(0,0) scale(0.1953125)">
+    <rect x="0" y="0" width="1024" height="1024" rx="192" ry="192" fill="url(#bg)"/>
+    <path d="M 386 336 C 386 470 452 552 500 616" fill="none" stroke="#5B7FFF" stroke-width="54" stroke-linecap="round"/>
+    <path d="M 638 336 C 638 470 572 552 524 616" fill="none" stroke="#2FE0C4" stroke-width="54" stroke-linecap="round"/>
+    <circle cx="386" cy="336" r="62" fill="url(#blueNode)"/>
+    <circle cx="638" cy="336" r="62" fill="url(#tealNode)"/>
+    <circle cx="512" cy="700" r="82" fill="#F3F5FF"/>
+    <circle cx="706" cy="770" r="96" fill="#1B2040"/>
+    <circle cx="706" cy="770" r="82" fill="#22C55E"/>
+    <path d="M 664 772 L 694 802 L 752 738" fill="none" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="228" y="140" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-weight="700" font-size="112" fill="#1B2040">Gita</text>
+</svg>

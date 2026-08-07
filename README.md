@@ -1,4 +1,7 @@
-# Gita
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/branding/logo-dark.png">
+  <img alt="Gita" src="assets/branding/logo.png" width="360">
+</picture>
 
 A cross-platform desktop app (macOS, Windows, Linux) for managing multiple Git
 identities — e.g. Work vs. Personal — and preventing the class of bug where a
