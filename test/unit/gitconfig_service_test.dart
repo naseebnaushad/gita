@@ -64,7 +64,7 @@ void main() {
     final content = await File(paths.gitConfigPath).readAsString();
     expect(content, contains('# >>> Gita managed rules'));
     expect(content, contains('# <<< Gita managed rules'));
-    expect(content, contains('[includeIf "gitdir:/Users/me/work/"]'));
+    expect(content, contains('[includeIf "gitdir/i:/Users/me/work/"]'));
     expect(content, contains('path = ${paths.profilesDir}/p1.gitconfig'));
   });
 

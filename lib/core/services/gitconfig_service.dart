@@ -71,18 +71,27 @@ class GitConfigService {
     required Map<String, Profile> profilesById,
   }) async {
     final sorted = [...rules]
-      ..sort((a, b) => a.pathPattern.length.compareTo(b.pathPattern.length));
+      ..sort((a, b) => paths
+          .toGitConfigPath(a.pathPattern)
+          .length
+          .compareTo(paths.toGitConfigPath(b.pathPattern).length));
 
     final block = StringBuffer()..writeln(_startMarker);
     for (final rule in sorted) {
       final profile = profilesById[rule.profileId];
       if (profile == null) continue;
-      final gitDir = rule.pathPattern.endsWith('/')
-          ? rule.pathPattern
-          : '${rule.pathPattern}/';
+      // `gitdir:` matching is forward-slash-only regardless of OS — a
+      // backslash is an escape character in the fnmatch-style pattern, not
+      // a separator, so a raw Windows path here would silently never
+      // match. `gitdir/i:` additionally matches case-insensitively, which
+      // Windows and (by default) macOS filesystems require.
+      final normalizedPattern = paths.toGitConfigPath(rule.pathPattern);
+      final gitDir = normalizedPattern.endsWith('/')
+          ? normalizedPattern
+          : '$normalizedPattern/';
       final includePath = paths.toGitConfigPath(_profileConfigPath(profile.id));
       block
-        ..writeln('[includeIf "gitdir:$gitDir"]')
+        ..writeln('[includeIf "gitdir/i:$gitDir"]')
         ..writeln('    path = $includePath');
     }
     block.writeln(_endMarker);

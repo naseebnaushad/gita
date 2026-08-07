@@ -11,7 +11,7 @@ void main() {
     await link.create(real.path);
 
     final resolved = resolveRepoPath(linkPath);
-    expect(resolved, real.resolveSymbolicLinksSync());
+    expect(resolved, real.resolveSymbolicLinksSync().replaceAll('\\', '/'));
 
     await link.delete();
     await real.delete(recursive: true);
