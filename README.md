@@ -34,7 +34,7 @@ push where the effective identity doesn't match what's expected for that repo.
 
 Planned: SSH key manager with host aliasing, a pre-push hook that blocks
 mismatched pushes outright, remote URL rewriting, and a credential-helper
-inspector. See `git-identity-manager-plan.md` for the full roadmap.
+inspector.
 
 ## Getting started
 
