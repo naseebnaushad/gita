@@ -150,11 +150,6 @@ class _Brand extends StatelessWidget {
             height: 36,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [GitaColors.blueLight, GitaColors.teal],
-              ),
               boxShadow: [
                 BoxShadow(
                   color: GitaColors.blue.withValues(alpha: 0.35),
@@ -163,7 +158,10 @@ class _Brand extends StatelessWidget {
                 ),
               ],
             ),
-            child: const Icon(Icons.fingerprint_rounded, color: Colors.white, size: 20),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.asset('assets/branding/icon.png', fit: BoxFit.cover),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -175,7 +173,7 @@ class _Brand extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 19),
                 ),
                 Text(
-                  'identity manager',
+                  'git account manager',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
