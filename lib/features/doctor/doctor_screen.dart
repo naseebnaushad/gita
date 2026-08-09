@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/theme.dart';
 import '../../core/models/doctor_issue.dart';
 import '../../core/models/mismatch_report.dart' show Severity;
 import '../../core/providers.dart';
+import '../../widgets/empty_state.dart';
+import '../../widgets/screen_header.dart';
+import '../../widgets/status_chip.dart';
 
 class DoctorScreen extends ConsumerWidget {
   const DoctorScreen({super.key});
@@ -12,81 +16,69 @@ class DoctorScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final issuesAsync = ref.watch(doctorIssuesProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Doctor'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Re-run checks',
-            onPressed: () => ref.invalidate(doctorIssuesProvider),
-          ),
-        ],
-      ),
-      body: issuesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Failed to run checks: $e')),
-        data: (issues) {
-          if (issues.isEmpty) {
-            return const _AllClearState();
-          }
-          final blocking = issues.where((i) => i.severity == Severity.blocking).toList();
-          final warnings = issues.where((i) => i.severity == Severity.warning).toList();
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text(
-                'Checks the setup itself for problems that would otherwise '
-                'only show up as a failed commit or push — e.g. a profile '
-                'with signing enabled but no matching key on this machine.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 16),
-              if (blocking.isNotEmpty) ...[
-                _SectionHeader(
-                  icon: Icons.cancel,
-                  color: Colors.red,
-                  label: '${blocking.length} would block a commit',
-                ),
-                for (final issue in blocking) _IssueTile(issue: issue),
-                const SizedBox(height: 16),
-              ],
-              if (warnings.isNotEmpty) ...[
-                _SectionHeader(
-                  icon: Icons.warning_amber,
-                  color: Colors.orange,
-                  label: '${warnings.length} configuration warning(s)',
-                ),
-                for (final issue in warnings) _IssueTile(issue: issue),
-              ],
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _AllClearState extends StatelessWidget {
-  const _AllClearState();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.check_circle, color: Colors.green, size: 40),
-            SizedBox(height: 12),
-            Text(
-              'No issues found. Profiles, rules, and keys are consistent.',
-              textAlign: TextAlign.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ScreenHeader(
+          title: 'Doctor',
+          subtitle: 'Checks your setup for problems before they cause a '
+              'failed commit or push.',
+          actions: [
+            OutlinedButton.icon(
+              onPressed: () => ref.invalidate(doctorIssuesProvider),
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Re-run checks'),
             ),
           ],
         ),
-      ),
+        Expanded(
+          child: issuesAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Center(child: Text('Failed to run checks: $e')),
+            data: (issues) {
+              if (issues.isEmpty) {
+                return const EmptyState(
+                  icon: Icons.verified_outlined,
+                  title: 'All clear',
+                  message: 'No issues found. Profiles, rules, and keys are consistent.',
+                );
+              }
+              final blocking = issues.where((i) => i.severity == Severity.blocking).toList();
+              final warnings = issues.where((i) => i.severity == Severity.warning).toList();
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(28, 8, 28, 28),
+                children: [
+                  if (blocking.isNotEmpty) ...[
+                    _SectionHeader(
+                      icon: Icons.cancel_rounded,
+                      color: GitaColors.red,
+                      label: '${blocking.length} would block a commit',
+                    ),
+                    const SizedBox(height: 10),
+                    for (final issue in blocking) ...[
+                      _IssueTile(issue: issue),
+                      const SizedBox(height: 10),
+                    ],
+                    const SizedBox(height: 8),
+                  ],
+                  if (warnings.isNotEmpty) ...[
+                    _SectionHeader(
+                      icon: Icons.warning_rounded,
+                      color: GitaColors.amber,
+                      label: '${warnings.length} configuration warning(s)',
+                    ),
+                    const SizedBox(height: 10),
+                    for (final issue in warnings) ...[
+                      _IssueTile(issue: issue),
+                      const SizedBox(height: 10),
+                    ],
+                  ],
+                ],
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -100,16 +92,7 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 18),
-          const SizedBox(width: 8),
-          Text(label, style: Theme.of(context).textTheme.titleSmall),
-        ],
-      ),
-    );
+    return StatusChip(label: label, color: color, icon: icon);
   }
 }
 
@@ -121,14 +104,33 @@ class _IssueTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final blocking = issue.severity == Severity.blocking;
+    final color = blocking ? GitaColors.red : GitaColors.amber;
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: ListTile(
-        leading: Icon(
-          blocking ? Icons.cancel : Icons.warning_amber,
-          color: blocking ? Colors.red : Colors.orange,
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                blocking ? Icons.close_rounded : Icons.priority_high_rounded,
+                color: color,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(issue.message, style: Theme.of(context).textTheme.bodyMedium),
+            ),
+          ],
         ),
-        title: Text(issue.message),
       ),
     );
   }

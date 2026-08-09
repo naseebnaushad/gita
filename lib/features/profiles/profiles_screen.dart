@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/theme.dart';
 import '../../core/models/profile.dart';
 import '../../core/providers.dart';
+import '../../widgets/empty_state.dart';
+import '../../widgets/initials_avatar.dart';
+import '../../widgets/screen_header.dart';
 
 class ProfilesScreen extends ConsumerWidget {
   const ProfilesScreen({super.key});
@@ -12,53 +16,57 @@ class ProfilesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profilesAsync = ref.watch(profilesProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Profiles'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'New profile',
-            onPressed: () => _openEditor(context, ref, null),
-          ),
-        ],
-      ),
-      body: profilesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Failed to load profiles: $e')),
-        data: (profiles) {
-          if (profiles.isEmpty) {
-            return const _EmptyState();
-          }
-          return ListView.separated(
-            itemCount: profiles.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, i) {
-              final profile = profiles[i];
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Color(profile.colorArgb),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ScreenHeader(
+          title: 'Profiles',
+          subtitle: 'Git identities you can assign to folders.',
+          actions: [
+            FilledButton.icon(
+              onPressed: () => _openEditor(context, ref, null),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('New profile'),
+            ),
+          ],
+        ),
+        Expanded(
+          child: profilesAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Center(child: Text('Failed to load profiles: $e')),
+            data: (profiles) {
+              if (profiles.isEmpty) {
+                return EmptyState(
+                  icon: Icons.badge_outlined,
+                  title: 'No profiles yet',
+                  message: 'Create one for each Git identity (e.g. Work, '
+                      'Personal) to start assigning folders to it.',
+                  actionLabel: 'New profile',
+                  onAction: () => _openEditor(context, ref, null),
+                );
+              }
+              return GridView.builder(
+                padding: const EdgeInsets.fromLTRB(28, 8, 28, 28),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 340,
+                  mainAxisExtent: 152,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
                 ),
-                title: Text(profile.label),
-                subtitle: Text('${profile.gitName} <${profile.gitEmail}>'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () => _openEditor(context, ref, profile),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () => _confirmDelete(context, ref, profile),
-                    ),
-                  ],
-                ),
+                itemCount: profiles.length,
+                itemBuilder: (context, i) {
+                  final profile = profiles[i];
+                  return _ProfileCard(
+                    profile: profile,
+                    onEdit: () => _openEditor(context, ref, profile),
+                    onDelete: () => _confirmDelete(context, ref, profile),
+                  );
+                },
               );
             },
-          );
-        },
-      ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -94,32 +102,90 @@ class ProfilesScreen extends ConsumerWidget {
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+class _ProfileCard extends StatelessWidget {
+  const _ProfileCard({
+    required this.profile,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final Profile profile;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(24),
-        child: Text(
-          'No profiles yet. Create one for each Git identity (e.g. Work, '
-          'Personal) to start assigning folders to it.',
-          textAlign: TextAlign.center,
+    final scheme = Theme.of(context).colorScheme;
+    final color = Color(profile.colorArgb);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onEdit,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  InitialsAvatar(label: profile.label, color: color, radius: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          profile.label,
+                          style: Theme.of(context).textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          profile.gitName,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert, size: 18, color: scheme.onSurfaceVariant),
+                    onSelected: (v) => v == 'edit' ? onEdit() : onDelete(),
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'edit', child: Text('Edit')),
+                      PopupMenuItem(value: 'delete', child: Text('Delete')),
+                    ],
+                  ),
+                ],
+              ),
+              const Spacer(),
+              Row(
+                children: [
+                  Icon(Icons.alternate_email, size: 14, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      profile.gitEmail,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (profile.signCommitsByDefault)
+                    Tooltip(
+                      message: 'Signs commits by default',
+                      child: Icon(Icons.verified_user_outlined, size: 15, color: scheme.primary),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
-
-const _palette = [
-  0xFF3D5AFE,
-  0xFF00BFA5,
-  0xFFFF6D00,
-  0xFFD500F9,
-  0xFFC51162,
-  0xFF64DD17,
-];
 
 class _ProfileEditorDialog extends ConsumerStatefulWidget {
   const _ProfileEditorDialog({this.existing});
@@ -150,7 +216,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     _emailController = TextEditingController(text: e?.gitEmail ?? '');
     _tokenController = TextEditingController();
     _signByDefault = e?.signCommitsByDefault ?? false;
-    _colorArgb = e?.colorArgb ?? _palette[0];
+    _colorArgb = e?.colorArgb ?? profileColorPalette[0];
     if (e != null) {
       ref.read(secureTokenServiceProvider).readToken(e.id).then((token) {
         if (!mounted || token == null) return;
@@ -174,8 +240,19 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
   @override
   Widget build(BuildContext context) {
     final isNew = widget.existing == null;
+    final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: Text(isNew ? 'New profile' : 'Edit profile'),
+      title: Row(
+        children: [
+          InitialsAvatar(
+            label: _labelController.text.isEmpty ? '?' : _labelController.text,
+            color: Color(_colorArgb),
+            radius: 16,
+          ),
+          const SizedBox(width: 12),
+          Text(isNew ? 'New profile' : 'Edit profile'),
+        ],
+      ),
       content: SizedBox(
         width: 420,
         child: Form(
@@ -187,12 +264,15 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
                 controller: _labelController,
                 decoration: const InputDecoration(labelText: 'Label (e.g. Work)'),
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                onChanged: (_) => setState(() {}),
               ),
+              const SizedBox(height: 14),
               TextFormField(
                 controller: _nameController,
                 decoration: const InputDecoration(labelText: 'Git user.name'),
                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
+              const SizedBox(height: 14),
               TextFormField(
                 controller: _emailController,
                 decoration: const InputDecoration(labelText: 'Git user.email'),
@@ -202,6 +282,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
                   return null;
                 },
               ),
+              const SizedBox(height: 14),
               TextFormField(
                 controller: _tokenController,
                 obscureText: _obscureToken,
@@ -214,24 +295,33 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Sign commits by default'),
                 value: _signByDefault,
                 onChanged: (v) => setState(() => _signByDefault = v),
               ),
+              const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Wrap(
-                  spacing: 8,
+                  spacing: 10,
                   children: [
-                    for (final c in _palette)
+                    for (final c in profileColorPalette)
                       GestureDetector(
                         onTap: () => setState(() => _colorArgb = c),
-                        child: CircleAvatar(
-                          radius: 14,
-                          backgroundColor: Color(c),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          width: _colorArgb == c ? 32 : 28,
+                          height: _colorArgb == c ? 32 : 28,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Color(c),
+                            border: _colorArgb == c
+                                ? Border.all(color: scheme.onSurface, width: 2)
+                                : null,
+                          ),
                           child: _colorArgb == c
                               ? const Icon(Icons.check, size: 16, color: Colors.white)
                               : null,
