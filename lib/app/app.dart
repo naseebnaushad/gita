@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../core/providers.dart';
+import '../core/services/cli_installer.dart';
 
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/doctor/doctor_screen.dart';
@@ -29,15 +33,25 @@ class _NavItem {
   final String label;
 }
 
-class _HomeShell extends StatefulWidget {
+class _HomeShell extends ConsumerStatefulWidget {
   const _HomeShell();
 
   @override
-  State<_HomeShell> createState() => _HomeShellState();
+  ConsumerState<_HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<_HomeShell> {
+class _HomeShellState extends ConsumerState<_HomeShell> {
   int _selected = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Install or update the gita command git uses for HTTPS sign-in. Doctor
+    // reports it if this didn't work, so failures are only logged here.
+    ref.read(cliInstallProvider.future).then((result) {
+      if (result.status == CliInstallStatus.failed) debugPrint('$result');
+    }, onError: (Object e) => debugPrint('Installing the gita command failed: $e'));
+  }
 
   static const _items = [
     _NavItem(Icons.dashboard_outlined, Icons.dashboard_rounded, 'Dashboard'),

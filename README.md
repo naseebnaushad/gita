@@ -103,18 +103,22 @@ how to replace it. Doctor (in the app and `gita doctor`) warns about
 profiles with no token, and about tokens saved while the `gita` command is
 not installed yet.
 
-Until the installers ship the command, install it by hand:
+Gita installs the command by itself. Windows and Linux builds of the app
+carry a copy in a `cli` folder next to the app, and every time Gita starts
+it copies that to `~/.gita/bin` if it is missing or out of date, then
+rewrites the profiles' git settings so saved sign-ins start working.
+Nobody has to install anything by hand.
+
+The build does this through a step at the end of `windows/CMakeLists.txt`
+and `linux/CMakeLists.txt`, which runs `dart build cli` (about 5 seconds).
+macOS builds don't include it yet; on a Mac, install it by hand:
 
 ```
 dart build cli
-# macOS / Linux
 mkdir -p ~/.gita/bin && cp build/cli/*/bundle/bin/gita ~/.gita/bin/
-# Windows (PowerShell)
-New-Item -ItemType Directory -Force ~/.gita/bin; Copy-Item build/cli/windows_x64/bundle/bin/gita.exe ~/.gita/bin/
 ```
 
-Then open the profile in Gita and press Save again so it writes the
-credential settings.
+then open each profile in Gita and press Save again.
 
 ### Sign in with GitHub
 

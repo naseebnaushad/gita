@@ -106,3 +106,30 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# === gita command ===
+# Build the headless `gita` command (bin/gita.dart) and ship it in a `cli`
+# folder next to the app. Gita copies it to ~/.gita/bin when it starts, so
+# git can run it as the HTTPS credential helper without anyone installing
+# it by hand.
+# Read FLUTTER_ROOT inside a function: the generated file also sets
+# variables in its caller's parent scope, which top-level code doesn't have.
+function(gita_read_flutter_root)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/flutter/ephemeral/generated_config.cmake")
+  set(GITA_FLUTTER_ROOT "${FLUTTER_ROOT}" PARENT_SCOPE)
+endfunction()
+gita_read_flutter_root()
+get_filename_component(GITA_PROJECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+set(GITA_CLI_BUILD_DIR "${CMAKE_BINARY_DIR}/gita_cli")
+install(CODE "
+  execute_process(
+    COMMAND \"${GITA_FLUTTER_ROOT}/bin/cache/dart-sdk/bin/dart.exe\" build cli
+            --output \"${GITA_CLI_BUILD_DIR}\" --verbosity=warning
+    WORKING_DIRECTORY \"${GITA_PROJECT_DIR}\"
+    RESULT_VARIABLE gita_cli_result)
+  if(NOT gita_cli_result EQUAL 0)
+    message(FATAL_ERROR \"Building the gita command (dart build cli) failed.\")
+  endif()
+  file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/cli\")
+  file(COPY \"${GITA_CLI_BUILD_DIR}/bundle/\" DESTINATION \"${CMAKE_INSTALL_PREFIX}/cli\")
+  " COMPONENT Runtime)

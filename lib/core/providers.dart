@@ -5,6 +5,7 @@ import 'models/profile.dart';
 import 'models/repo_rule.dart';
 import 'models/ssh_key.dart';
 import 'models/tracked_repo.dart';
+import 'services/cli_installer.dart';
 import 'services/git_service.dart';
 import 'services/gitconfig_service.dart';
 import 'services/github_device_flow.dart';
@@ -53,6 +54,25 @@ final secureTokenServiceProvider = Provider((ref) => SecureTokenService());
 final gitHubDeviceFlowProvider = Provider<GitHubDeviceFlow?>((ref) {
   final clientId = resolveGitHubClientId();
   return clientId == null ? null : GitHubDeviceFlow(clientId: clientId);
+});
+
+final cliInstallerProvider =
+    Provider((ref) => CliInstaller(paths: ref.watch(platformPathsProvider)));
+
+/// Puts the `gita` command this app ships in ~/.gita/bin (or updates it)
+/// and, when that changed anything, rewrites the profiles' git settings so
+/// profiles with a saved GitHub sign-in start using it. Read once at
+/// startup.
+final cliInstallProvider = FutureProvider<CliInstallResult>((ref) async {
+  final result = await ref.read(cliInstallerProvider).install();
+  if (result.changed) {
+    final profiles = await ref.read(profilesProvider.future);
+    if (profiles.isNotEmpty) {
+      await ref.read(profilesProvider.notifier).resyncGitConfig();
+    }
+    ref.invalidate(doctorIssuesProvider);
+  }
+  return result;
 });
 
 final gpgServiceProvider = Provider((ref) => const GpgService());
