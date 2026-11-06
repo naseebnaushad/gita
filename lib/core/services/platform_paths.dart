@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 class PlatformPaths {
   /// [overrideHomeDir] lets tests point the whole path tree at a temp
   /// directory instead of the real user home.
-  const PlatformPaths({String? overrideHomeDir}) : _overrideHomeDir = overrideHomeDir;
+  const PlatformPaths({this._overrideHomeDir});
 
   final String? _overrideHomeDir;
 
