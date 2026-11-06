@@ -50,7 +50,25 @@ class _HomeShellState extends ConsumerState<_HomeShell> {
     // reports it if this didn't work, so failures are only logged here.
     ref.read(cliInstallProvider.future).then((result) {
       if (result.status == CliInstallStatus.failed) debugPrint('$result');
-    }, onError: (Object e) => debugPrint('Installing the gita command failed: $e'));
+    }, onError: (Object e) => debugPrint('Installing the gita command failed: $e'))
+        .whenComplete(_moveOldTokens);
+  }
+
+  /// Moves sign-ins saved by older Gita versions into the OS credential
+  /// store, then rewrites the git config so pushes use them.
+  Future<void> _moveOldTokens() async {
+    try {
+      final profiles = await ref.read(profileRepositoryProvider).getAll();
+      final moved = await ref
+          .read(secureTokenServiceProvider)
+          .migrateLegacy(profiles.map((p) => p.id));
+      if (moved > 0 && mounted) {
+        await ref.read(profilesProvider.notifier).resyncGitConfig();
+        ref.invalidate(doctorIssuesProvider);
+      }
+    } catch (e) {
+      debugPrint('Moving old sign-ins failed: $e');
+    }
   }
 
   static const _items = [
