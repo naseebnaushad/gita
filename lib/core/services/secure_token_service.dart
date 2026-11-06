@@ -1,12 +1,18 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// Stores Git access tokens (PATs) in the OS credential store — Keychain on
-/// macOS, Credential Manager on Windows, libsecret on Linux. Tokens are keyed
-/// by profile id and never written to the plain JSON store or exported with
-/// profile/rule data (see plan §16 — no private key material in exports).
+import 'token_store.dart';
+
+/// The app's view of [TokenStore], plus a one-time move of tokens saved by
+/// earlier Gita versions.
+///
+/// Earlier versions kept tokens in flutter_secure_storage. On Windows that
+/// is an encrypted file only the app itself can read, so the `gita`
+/// credential helper couldn't use it. The first time a token is read it is
+/// moved into the shared OS credential store and the old copy is removed.
 class SecureTokenService {
-  const SecureTokenService({FlutterSecureStorage? storage})
-      : _storage = storage ??
+  SecureTokenService({TokenStore? store, FlutterSecureStorage? legacyStorage})
+      : _store = store ?? TokenStore(),
+        _legacy = legacyStorage ??
             // useDataProtectionKeyChain requires a keychain-access-groups
             // entitlement, which in turn requires signing with a real Apple
             // development certificate — unavailable for local/CI ad-hoc
@@ -15,23 +21,48 @@ class SecureTokenService {
               mOptions: MacOsOptions(useDataProtectionKeyChain: false),
             );
 
-  final FlutterSecureStorage _storage;
+  final TokenStore _store;
+  final FlutterSecureStorage _legacy;
 
-  String _keyFor(String profileId) => 'gita.token.$profileId';
+  TokenStore get store => _store;
 
-  Future<void> saveToken(String profileId, String token) {
-    return _storage.write(key: _keyFor(profileId), value: token);
+  Future<void> saveToken(String profileId, String token) async {
+    await _store.saveToken(profileId, token);
+    await _deleteLegacy(profileId);
   }
 
-  Future<String?> readToken(String profileId) {
-    return _storage.read(key: _keyFor(profileId));
+  Future<String?> readToken(String profileId) async {
+    final token = await _store.readToken(profileId);
+    if (token != null) return token;
+    return _migrateLegacy(profileId);
   }
 
-  Future<void> deleteToken(String profileId) {
-    return _storage.delete(key: _keyFor(profileId));
+  Future<void> deleteToken(String profileId) async {
+    await _store.deleteToken(profileId);
+    await _deleteLegacy(profileId);
   }
 
-  Future<bool> hasToken(String profileId) async {
-    return (await readToken(profileId)) != null;
+  Future<bool> hasToken(String profileId) async =>
+      (await readToken(profileId)) != null;
+
+  Future<String?> _migrateLegacy(String profileId) async {
+    final String? legacy;
+    try {
+      legacy = await _legacy.read(key: TokenStore.keyFor(profileId));
+    } catch (_) {
+      return null;
+    }
+    if (legacy == null) return null;
+    await _store.saveToken(profileId, legacy);
+    await _deleteLegacy(profileId);
+    return legacy;
+  }
+
+  Future<void> _deleteLegacy(String profileId) async {
+    try {
+      await _legacy.delete(key: TokenStore.keyFor(profileId));
+    } catch (_) {
+      // Nothing to clean up, or the old store is unavailable.
+    }
   }
 }

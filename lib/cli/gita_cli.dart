@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show stdin;
 
 import 'package:args/args.dart';
 
@@ -12,6 +13,7 @@ import '../core/services/mismatch_detector.dart';
 import '../core/services/path_resolver.dart';
 import '../core/services/platform_paths.dart';
 import '../core/services/ssh_config_service.dart';
+import '../core/services/token_store.dart';
 import '../core/storage/repositories.dart';
 
 /// Exit codes shared by every command, so hooks and agent integrations can
@@ -44,13 +46,22 @@ class GitaCli {
     this.paths = const PlatformPaths(),
     this.gitService = const GitService(),
     IdentityDoctorService? doctorService,
-  }) : doctorService = doctorService ?? const IdentityDoctorService();
+    TokenStore? tokenStore,
+    this.input,
+  }) : tokenStore = tokenStore ?? TokenStore() {
+    this.doctorService = doctorService ??
+        IdentityDoctorService(paths: paths, tokenStore: this.tokenStore);
+  }
 
   final StringSink out;
   final StringSink err;
   final PlatformPaths paths;
   final GitService gitService;
-  final IdentityDoctorService doctorService;
+  late final IdentityDoctorService doctorService;
+  final TokenStore tokenStore;
+
+  /// What git writes to the credential helper. Defaults to stdin.
+  final Stream<List<int>>? input;
 
   static const version = '0.1.0';
 
@@ -63,7 +74,13 @@ class GitaCli {
       ..addFlag('version', negatable: false)
       ..addCommand('which', command())
       ..addCommand('check', command())
-      ..addCommand('doctor', command());
+      ..addCommand('doctor', command())
+      ..addCommand(
+        'credential',
+        ArgParser()
+          ..addOption('profile', help: 'Profile id whose token to use.')
+          ..addFlag('help', abbr: 'h', negatable: false),
+      );
   }
 
   Future<int> run(List<String> arguments) async {
@@ -101,6 +118,10 @@ class GitaCli {
       return ExitCodes.usage;
     }
 
+    if (command.name == 'credential') {
+      return _credential(command['profile'] as String?, command.rest);
+    }
+
     final json = command['json'] as bool;
     switch (command.name) {
       case 'which':
@@ -127,6 +148,9 @@ Commands:
                    before they cause a failed commit or push.
 
 [folder] defaults to the current folder.
+
+Git also runs "gita credential --profile <id> get" by itself to sign in
+when you push over HTTPS. You don't need to run it.
 
 Options:
   --json           Print machine-readable JSON (for scripts and AI tools).
@@ -258,6 +282,86 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
         'ruleId': issue.ruleId,
         'sshKeyId': issue.sshKeyId,
       };
+
+  // ----------------------------------------------------------- credential
+
+  /// Git credential helper (https://git-scm.com/docs/gitcredentials).
+  ///
+  /// Gita's include file for a profile points git here for its folders, so
+  /// a push from a project authenticates with that project's account
+  /// rather than whichever single login the machine remembers. stdout is
+  /// read by git, so anything meant for the person goes to stderr, which
+  /// git shows in their terminal.
+  Future<int> _credential(String? profileId, List<String> rest) async {
+    if (profileId == null || rest.length != 1) {
+      err.writeln('Usage: gita credential --profile <id> <get|store|erase>');
+      return ExitCodes.usage;
+    }
+    final request = await _readCredentialRequest();
+    final profile = (await ProfileRepository(paths: paths).getAll())
+        .where((p) => p.id == profileId)
+        .firstOrNull;
+    final name = profile == null ? 'this account' : '"${profile.label}"';
+
+    switch (rest.single) {
+      case 'get':
+        final String? token;
+        try {
+          token = await tokenStore.readToken(profileId);
+        } catch (e) {
+          err
+            ..writeln("Gita: couldn't open this computer's password store "
+                'to sign in to GitHub.')
+            ..writeln('Gita: $e');
+          out.writeln('quit=1');
+          return ExitCodes.ok;
+        }
+        if (token == null) {
+          err
+            ..writeln('Gita: there is no GitHub sign-in saved for $name, so '
+                "this push can't sign in.")
+            ..writeln('Gita: open the Gita app, go to Profiles, edit $name, '
+                'paste an access token and press Save. Then push again.');
+          // Stop git from trying other ways to sign in (such as a login
+          // remembered for a different account) or prompting for a password.
+          out.writeln('quit=1');
+          return ExitCodes.ok;
+        }
+        // GitHub ignores the username when the password is a token; keep
+        // the one git sent (from the remote URL) so git doesn't complain.
+        out
+          ..writeln('username=${request['username'] ?? 'x-access-token'}')
+          ..writeln('password=$token');
+        return ExitCodes.ok;
+      case 'store':
+        // Tokens are saved in the Gita app, not by git.
+        return ExitCodes.ok;
+      case 'erase':
+        // Git says GitHub rejected the token. Leave it in place (deleting
+        // would hide what happened) and tell the person how to fix it.
+        err
+          ..writeln('Gita: GitHub did not accept the sign-in saved for '
+              '$name. It may have expired, or it may not have access to '
+              'this project.')
+          ..writeln('Gita: open the Gita app, go to Profiles, edit $name, '
+              'paste a new access token and press Save. Then push again.');
+        return ExitCodes.ok;
+      default:
+        err.writeln('Unknown credential action: ${rest.single}');
+        return ExitCodes.usage;
+    }
+  }
+
+  Future<Map<String, String>> _readCredentialRequest() async {
+    final text = await (input ?? stdin).transform(utf8.decoder).join();
+    final fields = <String, String>{};
+    for (final line in const LineSplitter().convert(text)) {
+      if (line.isEmpty) break;
+      final eq = line.indexOf('=');
+      if (eq > 0) fields[line.substring(0, eq)] = line.substring(eq + 1);
+    }
+    return fields;
+  }
 
   // -------------------------------------------------------------- helpers
 

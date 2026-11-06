@@ -19,11 +19,21 @@ class GitConfigService {
       '# >>> Gita managed rules — do not edit below by hand >>>';
   static const _endMarker = '# <<< Gita managed rules <<<';
 
+  /// HTTPS remotes the credential helper is scoped to. Other hosts keep
+  /// whatever helper the machine already uses.
+  static const credentialHosts = ['https://github.com'];
+
   /// Writes the per-profile `[user]`/`[core]`/`[commit]` include file that
   /// each `includeIf` block in `~/.gitconfig` points at.
+  ///
+  /// When [useCredentialHelper] is true (the profile has a saved token) and
+  /// the `gita` CLI is installed, HTTPS pushes in this profile's folders
+  /// authenticate through `gita credential` with that profile's token,
+  /// instead of whichever single GitHub login the machine remembers.
   Future<void> writeProfileConfigFile(
     Profile profile, {
     String? sshCommand,
+    bool useCredentialHelper = false,
   }) async {
     final dir = Directory(paths.profilesDir);
     await dir.create(recursive: true);
@@ -50,9 +60,32 @@ class GitConfigService {
       }
     }
 
+    if (useCredentialHelper && File(paths.cliPath).existsSync()) {
+      final helper = credentialHelperCommand(profile.id);
+      for (final host in credentialHosts) {
+        buffer
+          ..writeln('[credential "$host"]')
+          // An empty value clears the helpers configured so far (system and
+          // global, e.g. Git Credential Manager), so git can't fall back to
+          // a cached login for a different account.
+          ..writeln('    helper =')
+          ..writeln('    helper = ${_quoteConfigValue(helper)}');
+      }
+    }
+
     final file = File(_profileConfigPath(profile.id));
     await file.writeAsString(buffer.toString());
   }
+
+  /// The helper command git runs: the `!` prefix makes git run it through
+  /// its shell, and the quotes keep a home folder with spaces in one piece.
+  String credentialHelperCommand(String profileId) =>
+      '!"${paths.toGitConfigPath(paths.cliPath)}" credential --profile $profileId';
+
+  /// Wraps a git config value in double quotes, escaping the characters
+  /// git would otherwise interpret (quotes and backslashes).
+  static String _quoteConfigValue(String value) =>
+      '"${value.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
 
   String _profileConfigPath(String profileId) =>
       '${paths.profilesDir}/$profileId.gitconfig';

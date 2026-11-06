@@ -52,6 +52,11 @@ dependencies:
 
   # Argument parsing for the headless `gita` CLI (bin/gita.dart)
   args: ^2.6.0
+
+  # Pure-Dart OS credential store shared by the app and the CLI credential
+  # helper (Windows Credential Manager via advapi32)
+  ffi: ^2.1.0
+  win32: ^5.15.0
   google_fonts: ^8.2.1
 
 dev_dependencies:

@@ -37,6 +37,12 @@ class PlatformPaths {
   /// hook scripts parse without any DB/JSON dependency (plan §7).
   String get hookRulesCachePath => p.join(gitaDir, 'rules.cache');
 
+  /// Where the headless `gita` CLI is installed. Git runs it from here as
+  /// the HTTPS credential helper, so the path must stay stable across app
+  /// updates and must not depend on where the app itself was installed.
+  String get cliPath =>
+      p.join(gitaDir, 'bin', Platform.isWindows ? 'gita.exe' : 'gita');
+
   String get gitConfigPath => p.join(homeDir(), '.gitconfig');
 
   String get sshConfigPath => p.join(homeDir(), '.ssh', 'config');

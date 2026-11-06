@@ -361,8 +361,9 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
       colorArgb: _colorArgb,
       createdAt: existing?.createdAt ?? DateTime.now(),
     );
-    await ref.read(profilesProvider.notifier).upsert(profile);
-
+    // Save the token before the profile: saving the profile rewrites its
+    // git config, which turns the HTTPS credential helper on or off
+    // depending on whether a token is stored.
     final tokenService = ref.read(secureTokenServiceProvider);
     final token = _tokenController.text.trim();
     if (token.isNotEmpty) {
@@ -370,6 +371,8 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     } else if (_hadStoredToken) {
       await tokenService.deleteToken(profile.id);
     }
+
+    await ref.read(profilesProvider.notifier).upsert(profile);
 
     if (mounted) Navigator.pop(context);
   }

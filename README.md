@@ -21,7 +21,8 @@ push where the effective identity doesn't match what's expected for that repo.
 ## Features
 
 - **Profiles** — bundle a `user.name`/`user.email`, optional signing key, and
-  an optional access token (stored in the OS keychain/Credential
+  an optional GitHub access token that HTTPS pushes from that profile's
+  projects sign in with (stored in the OS keychain/Credential
   Manager/libsecret, never in a plain file) per identity.
 - **Rules** — map a folder to a profile; Gita writes a managed `includeIf`
   block into `~/.gitconfig` so Git resolves the right identity per repo
@@ -73,6 +74,52 @@ dart build cli          # -> build/cli/<platform>/bundle/bin/gita(.exe)
 
 (`dart compile exe` doesn't work here because some Flutter plugin
 dependencies use native build hooks; `dart build cli` handles them.)
+
+### HTTPS pushes with the right account
+
+Git normally remembers one GitHub login per computer, so every HTTPS push
+uses that account, whichever project it comes from. Gita fixes this per
+profile. Once a profile has an access token saved and the `gita` command is
+installed at `~/.gita/bin/gita` (`gita.exe` on Windows), the profile's
+include file tells git to sign in to `https://github.com` through
+`gita credential --profile <id>`. Git runs that command itself, and it
+answers with that profile's token from the OS credential store.
+
+The managed section looks like this:
+
+```
+[credential "https://github.com"]
+    helper =
+    helper = "!\"/home/me/.gita/bin/gita\" credential --profile <id>"
+```
+
+The empty `helper =` stops git from falling back to a login it remembered
+for another account. Projects outside the profile's folders, and other
+hosts, keep using whatever sign-in the computer already had.
+
+If no token is saved, the push stops with a message telling the person to
+add one in Gita. If GitHub rejects the token, the push says so and explains
+how to replace it. Doctor (in the app and `gita doctor`) warns about
+profiles with no token, and about tokens saved while the `gita` command is
+not installed yet.
+
+Until the installers ship the command, install it by hand:
+
+```
+dart build cli
+# macOS / Linux
+mkdir -p ~/.gita/bin && cp build/cli/*/bundle/bin/gita ~/.gita/bin/
+# Windows (PowerShell)
+New-Item -ItemType Directory -Force ~/.gita/bin; Copy-Item build/cli/windows_x64/bundle/bin/gita.exe ~/.gita/bin/
+```
+
+Then open the profile in Gita and press Save again so it writes the
+credential settings.
+
+Tokens live in Windows Credential Manager, the macOS login Keychain, or
+libsecret on Linux (which needs `secret-tool`, from the `libsecret-tools`
+package), filed under `gita`. Tokens saved by earlier versions of Gita move
+there automatically the first time the app reads them.
 
 Gita stores its own state (profiles, rules, tracked repos) as flat JSON under
 `~/.gita/`, plus one generated `.gitconfig` fragment per profile. It never

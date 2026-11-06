@@ -51,6 +51,41 @@ void main() {
     expect(content, contains('sshCommand = ssh -i ~/.ssh/id_work'));
   });
 
+  group('HTTPS credential helper', () {
+    void installCli() => File(paths.cliPath)
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('');
+
+    test('is written when the profile has a token and the CLI exists', () async {
+      installCli();
+      await service.writeProfileConfigFile(makeProfile('p1', 'work'),
+          useCredentialHelper: true);
+
+      final content = await File('${paths.profilesDir}/p1.gitconfig').readAsString();
+      final cli = paths.toGitConfigPath(paths.cliPath);
+      expect(content, contains('[credential "https://github.com"]'));
+      expect(content, contains('    helper =\n'));
+      expect(content,
+          contains('helper = "!\\"$cli\\" credential --profile p1"'));
+    });
+
+    test('is not written without a token', () async {
+      installCli();
+      await service.writeProfileConfigFile(makeProfile('p1', 'work'));
+
+      final content = await File('${paths.profilesDir}/p1.gitconfig').readAsString();
+      expect(content, isNot(contains('[credential')));
+    });
+
+    test('is not written while the CLI is missing', () async {
+      await service.writeProfileConfigFile(makeProfile('p1', 'work'),
+          useCredentialHelper: true);
+
+      final content = await File('${paths.profilesDir}/p1.gitconfig').readAsString();
+      expect(content, isNot(contains('[credential')));
+    });
+  });
+
   test('syncManagedIncludeIfBlock appends markers to a fresh gitconfig', () async {
     final profile = makeProfile('p1', 'work');
     await service.writeProfileConfigFile(profile);

@@ -44,12 +44,16 @@ final sshKeyRepositoryProvider =
 final trackedRepoRepositoryProvider =
     Provider((ref) => TrackedRepoRepository(paths: ref.watch(platformPathsProvider)));
 
-final secureTokenServiceProvider = Provider((ref) => const SecureTokenService());
+final secureTokenServiceProvider = Provider((ref) => SecureTokenService());
 
 final gpgServiceProvider = Provider((ref) => const GpgService());
 
 final identityDoctorServiceProvider = Provider(
-  (ref) => IdentityDoctorService(gpgService: ref.watch(gpgServiceProvider)),
+  (ref) => IdentityDoctorService(
+    gpgService: ref.watch(gpgServiceProvider),
+    paths: ref.watch(platformPathsProvider),
+    tokenStore: ref.watch(secureTokenServiceProvider).store,
+  ),
 );
 
 final doctorIssuesProvider = FutureProvider<List<DoctorIssue>>((ref) async {
@@ -79,11 +83,20 @@ class ProfilesNotifier extends AsyncNotifier<List<Profile>> {
     state = AsyncData(await ref.read(profileRepositoryProvider).getAll());
   }
 
+  /// Rewrites every profile's include file and the managed `includeIf`
+  /// block. Call after a profile's token is saved or removed, since that
+  /// turns its HTTPS credential helper on or off.
+  Future<void> resyncGitConfig() => _resyncGitConfig();
+
   Future<void> _resyncGitConfig() async {
     final profiles = state.value ?? [];
     final gitConfigService = ref.read(gitConfigServiceProvider);
+    final tokens = ref.read(secureTokenServiceProvider);
     for (final profile in profiles) {
-      await gitConfigService.writeProfileConfigFile(profile);
+      await gitConfigService.writeProfileConfigFile(
+        profile,
+        useCredentialHelper: await tokens.hasToken(profile.id),
+      );
     }
     final rules = await ref.read(repoRuleRepositoryProvider).getAll();
     await gitConfigService.syncManagedIncludeIfBlock(
