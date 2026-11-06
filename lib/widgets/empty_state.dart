@@ -10,6 +10,8 @@ class EmptyState extends StatelessWidget {
     required this.message,
     this.actionLabel,
     this.onAction,
+    this.secondaryLabel,
+    this.onSecondary,
   });
 
   final IconData icon;
@@ -17,6 +19,10 @@ class EmptyState extends StatelessWidget {
   final String message;
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// An optional second, quieter button under the main one.
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +73,10 @@ class EmptyState extends StatelessWidget {
                   icon: const Icon(Icons.add, size: 18),
                   label: Text(actionLabel!),
                 ),
+              ],
+              if (secondaryLabel != null && onSecondary != null) ...[
+                const SizedBox(height: 8),
+                TextButton(onPressed: onSecondary, child: Text(secondaryLabel!)),
               ],
             ],
           ),

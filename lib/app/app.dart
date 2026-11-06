@@ -8,6 +8,7 @@ import '../features/dashboard/dashboard_screen.dart';
 import '../features/doctor/doctor_screen.dart';
 import '../features/profiles/profiles_screen.dart';
 import '../features/rules/rules_screen.dart';
+import '../features/setup/setup_wizard.dart';
 import 'theme.dart';
 
 class GitaApp extends StatelessWidget {
@@ -52,7 +53,23 @@ class _HomeShellState extends ConsumerState<_HomeShell> {
       if (result.status == CliInstallStatus.failed) debugPrint('$result');
     }, onError: (Object e) => debugPrint('Installing the gita command failed: $e'))
         .whenComplete(_moveOldTokens)
-        .whenComplete(_updateGuards);
+        .whenComplete(_updateGuards)
+        .whenComplete(_offerSetup);
+  }
+
+  /// On the first start, with no profiles yet, offers to scan this computer
+  /// and set everything up.
+  Future<void> _offerSetup() async {
+    try {
+      if (!await ref.read(setupActionsProvider).shouldOfferSetup()) return;
+    } catch (e) {
+      debugPrint('Checking for first start failed: $e');
+      return;
+    }
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showSetupWizard(context);
+    });
   }
 
   /// Moves sign-ins saved by older Gita versions into the OS credential

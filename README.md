@@ -20,6 +20,14 @@ push where the effective identity doesn't match what's expected for that repo.
 
 ## Features
 
+- **Set up in one go** — the first time Gita opens (or any time from
+  **Scan this computer** on Profiles), it looks through the usual project
+  folders, sees which email each project commits with, and suggests one
+  profile per account with the folders that belong to it and any matching
+  SSH key. People untick or rename what they want, press **Set these up**,
+  and Gita makes the profiles and folder rules, adds the projects to the
+  Dashboard with the safety check, and offers **Sign in with GitHub** for
+  each profile. Nothing changes before that button.
 - **Profiles** — bundle a `user.name`/`user.email`, optional signing key, and
   an optional GitHub access token that HTTPS pushes from that profile's
   projects sign in with (stored in the OS keychain/Credential
@@ -61,6 +69,7 @@ coding agents, which can't use the desktop app. It reads the same profiles
 and rules the app saves.
 
 ```
+gita scan [folder...]  # suggest profiles from the projects on this computer (changes nothing)
 gita which [folder]    # which account should this project use, and which is it using?
 gita check [folder]    # same, but exits 1 if it would commit/push as the wrong account
 gita doctor            # find setup problems before they break a commit or push
@@ -83,6 +92,28 @@ dart build cli          # -> build/cli/<platform>/bundle/bin/gita(.exe)
 
 (`dart compile exe` doesn't work here because some Flutter plugin
 dependencies use native build hooks; `dart build cli` handles them.)
+
+### Setting up from the projects already on the computer
+
+`gita scan` (and **Scan this computer** in the app) looks in the usual
+project folders under your home folder (`StudioProjects`, `source/repos`,
+`code`, `dev`, `projects`, `git`, `Documents/GitHub`, `Desktop` and so
+on), or in the folders you name. For each project it reads the email
+the project's recent commits used, and any email set inside the project.
+Then:
+
+- Each email becomes a suggested profile. The one in `~/.gitconfig` is
+  marked as used where no rule applies.
+- A folder goes to a profile when every project in it uses that email;
+  otherwise each project gets its own rule. The home folder and drive
+  roots are never used.
+- An SSH key is matched through `~/.ssh/config` or the email in its
+  `.pub` file.
+- Emails that are already a profile are shown as such, so running it
+  again only adds what is new.
+
+It looks 4 folders deep, skips hidden folders and `node_modules`, `build`
+and similar, and stops at 400 projects.
 
 ### The safety check: wrong-account commits and pushes are stopped
 

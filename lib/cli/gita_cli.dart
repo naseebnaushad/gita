@@ -13,6 +13,7 @@ import '../core/services/github_device_flow.dart';
 import '../core/services/github_oauth_config.dart';
 import '../core/services/hook_service.dart';
 import '../core/services/identity_doctor_service.dart';
+import '../core/services/machine_scanner.dart';
 import '../core/services/mismatch_detector.dart';
 import '../core/services/path_resolver.dart';
 import '../core/services/platform_paths.dart';
@@ -96,6 +97,7 @@ class GitaCli {
       ..addCommand('doctor', command())
       ..addCommand('guard', command())
       ..addCommand('profiles', command())
+      ..addCommand('scan', command())
       ..addCommand(
         'sign-in',
         command()
@@ -166,6 +168,8 @@ class GitaCli {
         return _guard(command.rest, json: json);
       case 'profiles':
         return _profiles(json: json);
+      case 'scan':
+        return _scan(command.rest, json: json);
       case 'sign-in':
         return _signIn(command, json: json);
     }
@@ -194,6 +198,10 @@ Commands:
                    Say whether the safety check is in place.
   profiles         List your profiles: email, GitHub account, sign-in,
                    SSH key and folders.
+  scan [folder...] Look through this computer's projects for the accounts
+                   they commit with, and suggest profiles and folders.
+                   Only looks; changes nothing. Without a folder it looks
+                   in the usual places (Projects, source/repos, ...).
   sign-in --profile <name or id>
                    Sign a profile in to GitHub (shows a code to enter on
                    github.com), so HTTPS pushes use that account.
@@ -258,6 +266,71 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
             : '  Folders:         ${folders.join(', ')}')
         ..writeln();
     }
+    return ExitCodes.ok;
+  }
+
+  // ----------------------------------------------------------------- scan
+
+  Future<int> _scan(List<String> folders, {required bool json}) async {
+    final missing = [for (final f in folders) if (!Directory(f).existsSync()) f];
+    if (missing.isNotEmpty) {
+      _fail('No such folder: ${missing.join(', ')}', json: json);
+      return ExitCodes.usage;
+    }
+    final scanner = MachineScanner(paths: paths, git: gitService);
+    final scan = await scanner.scan(
+      searchFolders: folders.isEmpty ? null : [for (final f in folders) resolveRepoPath(f)],
+      existingProfiles: await ProfileRepository(paths: paths).getAll(),
+    );
+    if (json) {
+      out.writeln(_encode({'ok': true, ...scan.toJson()}));
+      return ExitCodes.ok;
+    }
+    if (scan.searchedFolders.isEmpty) {
+      out
+        ..writeln("Didn't find any of the usual project folders.")
+        ..writeln('Say where your projects are: gita scan <folder> [folder...]');
+      return ExitCodes.ok;
+    }
+    out
+      ..writeln('Looked in: ${scan.searchedFolders.join(', ')}')
+      ..writeln('Found ${scan.repos.length} project(s) and ${scan.sshKeys.length} SSH key(s).')
+      ..writeln();
+    if (scan.suggestions.isEmpty) {
+      out.writeln('No accounts found. Add a profile in Gita yourself.');
+      return ExitCodes.ok;
+    }
+    for (final s in scan.suggestions) {
+      final tags = [
+        if (s.isGlobalDefault) 'used where no rule applies',
+        if (s.existingProfileId != null) 'already a profile',
+      ];
+      out.writeln('${s.label}: ${s.name} <${s.email}>'
+          '${tags.isEmpty ? '' : '  (${tags.join(', ')})'}');
+      if (s.githubLogin != null) out.writeln('  GitHub account:  @${s.githubLogin}');
+      out
+        ..writeln('  Projects:        ${s.repos.length}')
+        ..writeln('  SSH key:         ${s.sshKey?.privateKeyPath ?? 'none found'}');
+      if (s.folders.isEmpty) {
+        out.writeln('  Folders:         none');
+      } else {
+        out.writeln('  Folders:');
+        for (final f in s.folders) {
+          out.writeln('    $f');
+        }
+      }
+      out.writeln();
+    }
+    if (scan.unknownRepos.isNotEmpty) {
+      out
+        ..writeln("${scan.unknownRepos.length} project(s) have no commits yet, so their "
+            "account couldn't be told:")
+        ..writeAll([for (final r in scan.unknownRepos.take(10)) '  ${r.path}\n']);
+      if (scan.unknownRepos.length > 10) out.writeln('  ...');
+      out.writeln();
+    }
+    out.writeln('Nothing was changed. To set these up, open Gita and press '
+        '"Scan this computer" under Profiles.');
     return ExitCodes.ok;
   }
 

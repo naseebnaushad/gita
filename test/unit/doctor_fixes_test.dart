@@ -153,7 +153,7 @@ void main() {
     tearDown(() async {
       container.dispose();
       for (final d in [home, workspace, bundle]) {
-        if (d.existsSync()) await d.delete(recursive: true);
+        await _deleteQuietly(d);
       }
     });
 
@@ -299,4 +299,20 @@ void main() {
       });
     });
   });
+}
+
+/// Deletes a temp folder, retrying while Windows still has a file in it
+/// open (git, or a virus scanner, can hold one for a moment). A folder
+/// that still can't go is left for the OS to clean up rather than failing
+/// a test that passed.
+Future<void> _deleteQuietly(Directory d) async {
+  for (var attempt = 0; attempt < 10; attempt++) {
+    if (!d.existsSync()) return;
+    try {
+      await d.delete(recursive: true);
+      return;
+    } on FileSystemException {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+  }
 }
