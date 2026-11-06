@@ -28,6 +28,12 @@ push where the effective identity doesn't match what's expected for that repo.
   and Gita makes the profiles and folder rules, adds the projects to the
   Dashboard with the safety check, and offers **Sign in with GitHub** for
   each profile. Nothing changes before that button.
+- **Clone with the right account** — **Clone a project** on the Dashboard
+  (or `gita clone`) takes the address from GitHub's green Code button,
+  picks the profile whose GitHub account owns the project, and downloads
+  it with that profile's sign-in or SSH key. The new project is set up to
+  keep using that profile, gets the safety check, and appears on the
+  Dashboard.
 - **Profiles** — bundle a `user.name`/`user.email`, optional signing key, and
   an optional GitHub access token that HTTPS pushes from that profile's
   projects sign in with (stored in the OS keychain/Credential
@@ -70,6 +76,7 @@ and rules the app saves.
 
 ```
 gita scan [folder...]  # suggest profiles from the projects on this computer (changes nothing)
+gita clone <address> [folder] [--profile <name>]   # download a project with the right account
 gita which [folder]    # which account should this project use, and which is it using?
 gita check [folder]    # same, but exits 1 if it would commit/push as the wrong account
 gita doctor            # find setup problems before they break a commit or push
@@ -114,6 +121,33 @@ Then:
 
 It looks 4 folders deep, skips hidden folders and `node_modules`, `build`
 and similar, and stops at 400 projects.
+
+### Cloning with the right account
+
+A clone is the one moment no folder rule can help yet: the project isn't
+on the computer, so git would use whatever account it finds first.
+`gita clone` (and **Clone a project** in the app) avoids that:
+
+1. **Which account.** `--profile` if given; otherwise the profile whose
+   GitHub account matches the owner in the address (`github.com/acme/...`
+   -> the profile signed in as `acme`); otherwise the profile of the
+   folder rule covering the destination. If none fits, it asks for
+   `--profile` instead of guessing.
+2. **Where.** The folder given, or `<profile's rule folder>/<name>`, or
+   the first usual project folder.
+3. **The download** runs with that profile's settings for just this one
+   command (`git -c include.path=~/.gita/profiles/<id>.gitconfig clone`),
+   so HTTPS uses its GitHub sign-in and SSH addresses use its key. Git is
+   never left waiting for a password: if the sign-in is missing or wrong,
+   Gita says which profile to sign in.
+4. **After.** If no rule already gives the folder that profile, Gita adds
+   one for exactly that project. Then it adds the safety check and puts
+   the project on the Dashboard (`--no-track` skips those two).
+
+```
+gita clone https://github.com/acme/api.git                 # account worked out from "acme"
+gita clone git@github.com:acme/api.git ~/work/api --profile Work
+```
 
 ### The safety check: wrong-account commits and pushes are stopped
 

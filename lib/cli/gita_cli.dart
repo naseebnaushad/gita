@@ -2,11 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:path/path.dart' as p;
 
 import '../core/models/doctor_issue.dart';
 import '../core/models/mismatch_report.dart';
 import '../core/models/profile.dart';
 import '../core/models/repo_rule.dart';
+import '../core/services/clone_service.dart';
 import '../core/services/git_config_sync.dart';
 import '../core/services/git_service.dart';
 import '../core/services/github_device_flow.dart';
@@ -99,6 +101,12 @@ class GitaCli {
       ..addCommand('profiles', command())
       ..addCommand('scan', command())
       ..addCommand(
+        'clone',
+        command()
+          ..addOption('profile', help: 'Name or id of the profile to clone as.')
+          ..addFlag('no-track', negatable: false, help: "Don't add the safety check."),
+      )
+      ..addCommand(
         'sign-in',
         command()
           ..addOption('profile', help: 'Name or id of the profile to sign in.')
@@ -170,6 +178,8 @@ class GitaCli {
         return _profiles(json: json);
       case 'scan':
         return _scan(command.rest, json: json);
+      case 'clone':
+        return _clone(command, json: json);
       case 'sign-in':
         return _signIn(command, json: json);
     }
@@ -202,6 +212,14 @@ Commands:
                    they commit with, and suggest profiles and folders.
                    Only looks; changes nothing. Without a folder it looks
                    in the usual places (Projects, source/repos, ...).
+  clone <address> [folder] [--profile <name or id>]
+                   Download a project with the right account's sign-in
+                   and SSH key, then make sure it keeps using that
+                   account (adds a folder rule if needed, and the safety
+                   check). Without --profile, Gita picks the profile whose
+                   GitHub account owns the project, or whose folder it
+                   goes in. Without a folder, it goes in the profile's
+                   folder.
   sign-in --profile <name or id>
                    Sign a profile in to GitHub (shows a code to enter on
                    github.com), so HTTPS pushes use that account.
@@ -340,6 +358,84 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
   /// open github.com/login/device, wait) or, with --with-token, a token
   /// read from stdin. Saves the token, records the account on the profile
   /// and turns on HTTPS pushes for it.
+  Future<int> _clone(ArgResults command, {required bool json}) async {
+    if (command.rest.isEmpty || command.rest.length > 2) {
+      _fail(
+        'Say what to clone: gita clone <address> [folder] [--profile <name>]. '
+        "The address is on the project's GitHub page, under the green Code button.",
+        json: json,
+      );
+      return ExitCodes.usage;
+    }
+    final url = command.rest.first;
+    if (!CloneService.looksLikeGitUrl(url)) {
+      _fail(
+        "\"$url\" doesn't look like a project address. Copy it from the green "
+        'Code button on GitHub, e.g. https://github.com/acme/api.git',
+        json: json,
+      );
+      return ExitCodes.usage;
+    }
+    final service = CloneService(paths: paths, git: gitService);
+    final profiles = await ProfileRepository(paths: paths).getAll();
+    final rules = await RepoRuleRepository(paths: paths).getAll();
+    if (profiles.isEmpty) {
+      _fail('There are no profiles yet. Open Gita and add one (or press "Scan this computer").', json: json);
+      return ExitCodes.usage;
+    }
+
+    final name = CloneService.repoNameFromUrl(url) ?? 'project';
+    String? destination = command.rest.length == 2 ? resolveRepoPath(p.normalize(p.absolute(cwd, command.rest[1]))) : null;
+
+    final wanted = command['profile'] as String?;
+    Profile? profile;
+    if (wanted != null) {
+      profile = _findProfile(profiles, wanted);
+      if (profile == null) {
+        final names = profiles.map((x) => '"${x.label}" (${x.id})').join(', ');
+        _fail('There is no profile called "$wanted". Profiles: $names', json: json);
+        return ExitCodes.usage;
+      }
+    } else {
+      profile = CloneService.suggestProfile(url, profiles);
+      if (profile == null && destination != null) {
+        final rule = RepoRule.bestMatchFor(destination, rules);
+        profile = profiles.where((x) => x.id == rule?.profileId).firstOrNull;
+      }
+      if (profile == null) {
+        final names = profiles.map((x) => x.label).join(', ');
+        _fail(
+          "Gita can't tell which account this project belongs to. Say which "
+          'with --profile, for example: gita clone $url --profile ${profiles.first.label}  '
+          '(profiles: $names)',
+          json: json,
+        );
+        return ExitCodes.usage;
+      }
+    }
+    destination ??= p.posix.join(service.parentFolderFor(profile, rules), name);
+
+    if (!json) out.writeln('Cloning as ${profile.label} <${profile.gitEmail}> into $destination ...');
+    final outcome = await service.clone(
+      url: url,
+      destination: destination,
+      profile: profile,
+      hasToken: tokenStore.hasToken,
+      track: !(command['no-track'] as bool),
+    );
+    if (json) {
+      out.writeln(_encode({...outcome.toJson(), 'profile': profile.id}));
+    } else if (outcome.ok) {
+      out.writeln(outcome.message);
+      if (outcome.addedRule) out.writeln('Added a rule so this folder always uses ${profile.label}.');
+      if (outcome.guardAdded) out.writeln('Added the safety check.');
+      if (outcome.guardProblem != null) out.writeln('Safety check not added: ${outcome.guardProblem}');
+    } else {
+      err.writeln(outcome.message);
+    }
+    return outcome.ok ? ExitCodes.ok : ExitCodes.problem;
+  }
+
   Future<int> _signIn(ArgResults command, {required bool json}) async {
     final wanted = command['profile'] as String?;
     if (wanted == null || wanted.trim().isEmpty) {

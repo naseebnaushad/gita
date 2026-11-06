@@ -89,6 +89,10 @@ class GitConfigService {
   static String _quoteConfigValue(String value) =>
       '"${value.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
 
+  /// The include file for [profileId], as `writeProfileConfigFile` writes
+  /// it. `git -c include.path=<this>` applies a profile to one command.
+  String profileConfigPath(String profileId) => _profileConfigPath(profileId);
+
   String _profileConfigPath(String profileId) =>
       '${paths.profilesDir}/$profileId.gitconfig';
 
