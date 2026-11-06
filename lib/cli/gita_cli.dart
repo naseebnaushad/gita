@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 
 import '../core/models/doctor_issue.dart';
 import '../core/models/mismatch_report.dart';
@@ -21,10 +23,13 @@ import '../core/services/mismatch_detector.dart';
 import '../core/services/path_resolver.dart';
 import '../core/services/platform_paths.dart';
 import '../core/services/push_guard.dart';
+import '../core/services/setup_service.dart';
 import '../core/services/ssh_config_service.dart';
 import '../core/services/token_store.dart';
 import '../core/storage/repositories.dart';
 import 'mcp_server.dart';
+
+part 'manage_commands.dart';
 
 /// Exit codes shared by every command, so hooks and agent integrations can
 /// branch on them without parsing output.
@@ -109,10 +114,36 @@ class GitaCli {
       ..addFlag('version', negatable: false)
       ..addCommand('which', command())
       ..addCommand('check', command())
-      ..addCommand('doctor', command())
+      ..addCommand(
+        'doctor',
+        command()..addFlag('fix', negatable: false, help: 'Fix what can be fixed without you.'),
+      )
       ..addCommand('guard', command())
       ..addCommand('profiles', command())
       ..addCommand('scan', command())
+      ..addCommand(
+        'setup',
+        command()
+          ..addMultiOption('only', help: 'Only set up the account with this email.')
+          ..addFlag('no-track', negatable: false, help: "Don't add the safety check to the projects."),
+      )
+      ..addCommand(
+        'profile',
+        command()
+          ..addOption('name', help: 'Name to commit with.')
+          ..addOption('email', help: 'Email to commit with.')
+          ..addOption('label', help: 'Short name for the profile, like "Work".')
+          ..addOption('github-login', help: 'GitHub account name.')
+          ..addMultiOption('folder', help: 'Folder whose projects use this profile.'),
+      )
+      ..addCommand(
+        'rule',
+        command()
+          ..addOption('profile', help: 'Name or id of the profile.')
+          ..addOption('folder', help: 'Folder whose projects use the profile.')
+          ..addOption('owner', help: 'GitHub account or organization whose projects use the profile.')
+          ..addOption('host', help: 'Git host for --owner (default github.com).'),
+      )
       ..addCommand(
         'clone',
         command()
@@ -129,7 +160,9 @@ class GitaCli {
         command()
           ..addOption('profile', help: 'Name or id of the profile to sign in.')
           ..addFlag('with-token', negatable: false, help: 'Read a token from stdin.')
-          ..addFlag('no-browser', negatable: false, help: "Don't open the browser."),
+          ..addFlag('no-browser', negatable: false, help: "Don't open the browser.")
+          // Used by `gita mcp`: print the code and finish in the background.
+          ..addFlag('no-wait', negatable: false, hide: true),
       )
       ..addCommand('mcp', command())
       ..addCommand('hook', ArgParser(allowTrailingOptions: false))
@@ -190,7 +223,13 @@ class GitaCli {
       case 'check':
         return _check(command.rest, json: json);
       case 'doctor':
-        return _doctor(json: json);
+        return _doctor(json: json, fix: command['fix'] as bool);
+      case 'setup':
+        return _setup(command, json: json);
+      case 'profile':
+        return _profile(command, json: json);
+      case 'rule':
+        return _rule(command, json: json);
       case 'guard':
         return _guard(command.rest, json: json);
       case 'profiles':
@@ -221,6 +260,28 @@ Commands:
                    would commit or push with the wrong account.
   doctor           Look for setup problems (missing keys, broken rules)
                    before they cause a failed commit or push.
+                   --fix also fixes what can be fixed without you.
+  setup [folder...] [--only <email>]...
+                   Look through this computer's projects (like "scan"),
+                   then set up what was found: a profile per account,
+                   folder rules, SSH keys and the safety check. --only
+                   sets up just those accounts; --no-track skips the
+                   safety check.
+  profile add --name <name> --email <email> [--label <label>]
+              [--github-login <account>] [--folder <folder>]...
+                   Add a profile by hand. Projects in each --folder
+                   use it.
+  profile edit <name or id> [--name ...] [--email ...] [--label ...]
+              [--github-login ...]
+                   Change a profile.
+  rule list        Show which folders and GitHub accounts use which
+                   profile.
+  rule add --profile <name or id> --folder <folder>
+  rule add --profile <name or id> --owner <account or organization>
+                   Make projects in a folder, or from a GitHub account
+                   or organization (wherever they are), use a profile.
+  rule remove <rule id, folder, or host/owner>
+                   Take a rule out again.
   guard install [folder]
                    Add Gita's safety check to a project, so a commit or
                    push with the wrong account is stopped before it
@@ -380,6 +441,8 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
         'email': p.gitEmail,
         'githubLogin': p.githubLogin,
         'signedIn': await tokenStore.hasToken(p.id),
+        if (_backgroundSignIns[p.id] case final state?)
+          state == 'waiting' ? 'signInWaiting' : 'signInError': state == 'waiting' ? true : state,
         'sshKey': p.sshKeyId != null,
         'folders': [
           for (final r in rules)
@@ -752,6 +815,10 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
           return ExitCodes.problem;
         }
         final code = await flow.start();
+        if (command['no-wait'] as bool) {
+          return _signInInBackground(flow, code, profile,
+              json: json, openTheBrowser: !(command['no-browser'] as bool));
+        }
         if (json) {
           out.writeln(jsonEncode({
             'step': 'enter-code',
@@ -778,25 +845,7 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       return ExitCodes.problem;
     }
 
-    await tokenStore.saveToken(profile.id, token);
-    final updated = profile.copyWith(githubLogin: account.login);
-    await repo.upsert(updated);
-    await syncGitConfig(
-      paths: paths,
-      hasToken: tokenStore.hasToken,
-      profiles: [for (final p in profiles) p.id == updated.id ? updated : p],
-    );
-
-    final email = account.email;
-    final emailNote = email != null && email.toLowerCase() != profile.gitEmail.toLowerCase()
-        ? "Note: this GitHub account's main email is $email, but "
-            '"${profile.label}" commits as ${profile.gitEmail}. That is fine if '
-            '${profile.gitEmail} is also added to the account on GitHub.'
-        : null;
-    final previous = profile.githubLogin;
-    final switched = previous != null && previous.toLowerCase() != account.login.toLowerCase()
-        ? '"${profile.label}" was signed in as @$previous before; it now uses @${account.login}.'
-        : null;
+    final (:emailNote, :switched, :previous) = await _saveSignIn(profile, token, account);
     if (json) {
       out.writeln(_encode({
         'ok': true,
@@ -812,6 +861,92 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
             'Pushes over HTTPS in its folders now use this account.');
       if (switched != null) out.writeln(switched);
       if (emailNote != null) out.writeln(emailNote);
+    }
+    return ExitCodes.ok;
+  }
+
+  /// Saves a finished sign-in: the token, the GitHub account on the
+  /// profile, and git's settings.
+  Future<({String? emailNote, String? switched, String? previous})> _saveSignIn(
+    Profile signedIn,
+    String token,
+    GitHubAccount account,
+  ) async {
+    final repo = ProfileRepository(paths: paths);
+    final profiles = await repo.getAll();
+    // Read it again: it may have changed while the person was on GitHub.
+    final profile = profiles.where((p) => p.id == signedIn.id).firstOrNull ?? signedIn;
+    await tokenStore.saveToken(profile.id, token);
+    final updated = profile.copyWith(githubLogin: account.login);
+    await repo.upsert(updated);
+    await syncGitConfig(
+      paths: paths,
+      hasToken: tokenStore.hasToken,
+      profiles: [
+        for (final p in profiles) p.id == updated.id ? updated : p,
+        if (!profiles.any((p) => p.id == updated.id)) updated,
+      ],
+    );
+
+    final email = account.email;
+    final emailNote = email != null && email.toLowerCase() != profile.gitEmail.toLowerCase()
+        ? "Note: this GitHub account's main email is $email, but "
+            '"${profile.label}" commits as ${profile.gitEmail}. That is fine if '
+            '${profile.gitEmail} is also added to the account on GitHub.'
+        : null;
+    final previous = profile.githubLogin;
+    final switched = previous != null && previous.toLowerCase() != account.login.toLowerCase()
+        ? '"${profile.label}" was signed in as @$previous before; it now uses @${account.login}.'
+        : null;
+    return (emailNote: emailNote, switched: switched, previous: previous);
+  }
+
+  /// `gita sign-in --no-wait`: prints the code and returns at once; the
+  /// sign-in finishes in the background once the person enters the code.
+  /// For `gita mcp`, which keeps running, so an AI tool can show the person
+  /// the code without its tool call waiting minutes. The token never
+  /// reaches the AI tool.
+  Future<int> _signInInBackground(
+    GitHubDeviceFlow flow,
+    DeviceCode code,
+    Profile profile, {
+    required bool json,
+    required bool openTheBrowser,
+  }) async {
+    final opened = openTheBrowser && await openBrowser(code.verificationUri);
+    final message = 'Ask the person to open ${code.verificationUri}'
+        '${opened ? ' (it was just opened in their browser)' : ''}, sign in as the '
+        'GitHub account for "${profile.label}", enter the code ${code.userCode} and '
+        'press Authorize. Gita finishes the sign-in by itself; check with '
+        'gita_profiles (signedIn becomes true).';
+    _backgroundSignIns[profile.id] = 'waiting';
+    unawaited(() async {
+      try {
+        final token = await flow.waitForToken(code);
+        final account = await flow.fetchAccount(token);
+        await _saveSignIn(profile, token, account);
+        _backgroundSignIns.remove(profile.id);
+      } on DeviceFlowException catch (e) {
+        _backgroundSignIns[profile.id] = e.message;
+      } catch (e) {
+        _backgroundSignIns[profile.id] = 'Sign-in failed: $e';
+      }
+    }());
+    if (json) {
+      out.writeln(_encode({
+        'ok': true,
+        'step': 'enter-code',
+        'profile': profile.id,
+        'code': code.userCode,
+        'url': code.verificationUri.toString(),
+        'browserOpened': opened,
+        'message': message,
+      }));
+    } else {
+      out
+        ..writeln('Signing "${profile.label}" in to GitHub.')
+        ..writeln('Open ${code.verificationUri}, sign in as its GitHub account, '
+            'enter ${code.userCode} and press Authorize.');
     }
     return ExitCodes.ok;
   }
@@ -919,29 +1054,41 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
 
   // --------------------------------------------------------------- doctor
 
-  Future<int> _doctor({required bool json}) async {
+  Future<List<DoctorIssue>> _runDoctor() async => doctorService.run(
+        profiles: await ProfileRepository(paths: paths).getAll(),
+        rules: await RepoRuleRepository(paths: paths).getAll(),
+        sshKeys: await SshKeyRepository(paths: paths).getAll(),
+      );
+
+  Future<int> _doctor({required bool json, bool fix = false}) async {
+    var issues = await _runDoctor();
+    final fixed = <String>[];
+    if (fix && issues.isNotEmpty) {
+      fixed.addAll(await _applyDoctorFixes(issues));
+      if (fixed.isNotEmpty) issues = await _runDoctor();
+    }
     final profiles = await ProfileRepository(paths: paths).getAll();
-    final rules = await RepoRuleRepository(paths: paths).getAll();
-    final sshKeys = await SshKeyRepository(paths: paths).getAll();
-    final issues = await doctorService.run(
-      profiles: profiles,
-      rules: rules,
-      sshKeys: sshKeys,
-    );
     final blocking = issues.any((i) => i.severity == Severity.blocking);
 
     if (json) {
       out.writeln(_encode({
         'ok': !blocking,
         'configured': profiles.isNotEmpty,
+        if (fix) 'fixed': fixed,
         'issues': issues.map(_issueToJson).toList(),
       }));
-    } else if (profiles.isEmpty) {
+      return blocking ? ExitCodes.problem : ExitCodes.ok;
+    }
+    for (final f in fixed) {
+      out.writeln('Fixed: $f');
+    }
+    if (fixed.isNotEmpty) out.writeln();
+    if (profiles.isEmpty) {
       out
         ..writeln('Gita isn\'t set up on this computer yet.')
         ..writeln()
         ..writeln('What to do:')
-        ..writeln('  - Open the Gita app and add your accounts under Profiles.');
+        ..writeln('  - Run "gita setup", or open the Gita app and add your accounts under Profiles.');
     } else if (issues.isEmpty) {
       out.writeln('All good: no setup problems found.');
     } else {
@@ -955,7 +1102,10 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       }
       out
         ..writeln()
-        ..writeln('Open Gita and go to Doctor for help fixing these.');
+        ..writeln(fix
+            ? 'Open Gita and go to Doctor for help fixing the rest.'
+            : 'Run "gita doctor --fix" to fix what can be fixed by itself, or '
+                'open Gita and go to Doctor for help.');
     }
     return blocking ? ExitCodes.problem : ExitCodes.ok;
   }
@@ -967,6 +1117,8 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
         'profileId': issue.profileId,
         'ruleId': issue.ruleId,
         'sshKeyId': issue.sshKeyId,
+        'githubOwner': ?issue.githubOwner,
+        'host': ?issue.host,
       };
 
   // ---------------------------------------------------------------- guard

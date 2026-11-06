@@ -299,4 +299,175 @@ void main() {
       expect(await run(['check', '--help']), ExitCodes.ok);
     });
   });
+
+  group('commands that change the setup', () {
+    Map<String, dynamic> lastJson() {
+      final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+      out.clear();
+      return json;
+    }
+
+    Future<void> gitRepo(String path, String email) async {
+      Directory(path).createSync(recursive: true);
+      for (final args in [
+        ['init', '-q'],
+        ['config', 'user.email', email],
+        ['config', 'user.name', 'Dev'],
+      ]) {
+        expect((await git.raw(args, workingDir: path)).exitCode, 0);
+      }
+    }
+
+    Future<String> emailIn(String dir) async =>
+        (await git.raw(['config', 'user.email'], workingDir: dir)).stdout.toString().trim();
+
+    test('profile add saves the profile and makes its folders use it', () async {
+      final code = await run([
+        'profile', '--name', 'Jane Doe', '--email', 'jane@acme.com', '--label', 'Work',
+        '--folder', workspace.path, 'add', '--json',
+      ]);
+      expect(code, ExitCodes.ok, reason: '$out$err');
+      final json = lastJson();
+      expect(json['profile']['label'], 'Work');
+      expect(json['profile']['email'], 'jane@acme.com');
+      expect(json['folders'], hasLength(1));
+
+      // git itself now commits as Jane in that folder.
+      expect(await emailIn(repoPath), 'jane@acme.com');
+
+      // Same email, same label, a bad email and a missing name are refused.
+      expect(await run(['profile', '--name', 'J', '--email', 'JANE@acme.com', 'add']), ExitCodes.usage);
+      expect(err.toString(), contains('already a profile for JANE@acme.com'));
+      expect(await run(['profile', '--name', 'J', '--email', 'j@x.com', '--label', 'work', 'add']), ExitCodes.usage);
+      expect(err.toString(), contains('already a profile called "work"'));
+      expect(await run(['profile', '--name', 'J', '--email', 'not-an-email', 'add']), ExitCodes.usage);
+      expect(err.toString(), contains('not an email address'));
+      expect(await run(['profile', '--email', 'j@x.com', 'add']), ExitCodes.usage);
+      expect(await ProfileRepository(paths: paths).getAll(), hasLength(1));
+    });
+
+    test('profile edit changes a profile, and says when there is nothing to change', () async {
+      await assignWorkspaceTo(aiProfile);
+
+      expect(await run(['profile', '--email', 'new@ai.example.com', 'edit', 'AI projects']), ExitCodes.ok,
+          reason: '$out$err');
+      expect(out.toString(), contains('new@ai.example.com'));
+      expect(await emailIn(repoPath), 'new@ai.example.com');
+
+      expect(await run(['profile', 'edit', 'ai']), ExitCodes.usage);
+      expect(err.toString(), contains('Nothing to change'));
+      expect(await run(['profile', '--name', 'X', 'edit', 'nobody']), ExitCodes.usage);
+      expect(err.toString(), contains('no profile called "nobody"'));
+      expect(await run(['profile', 'remove', 'ai']), ExitCodes.usage);
+    });
+
+    test('rule add, list and remove', () async {
+      await assignWorkspaceTo(aiProfile);
+      await run(['profile', '--name', 'Me', '--email', 'me@gmail.com', '--label', 'Personal', 'add']);
+      out.clear();
+
+      // A folder rule for the same folder is replaced, not added twice.
+      expect(await run(['rule', '--profile', 'Personal', '--folder', workspace.path, 'add', '--json']),
+          ExitCodes.ok, reason: '$out$err');
+      final replaced = lastJson();
+      expect(replaced['replacedProfile'], 'ai');
+      expect(replaced['rule']['id'], 'rule-1');
+      expect(replaced['message'], contains('instead of "AI projects"'));
+      expect(await emailIn(repoPath), 'me@gmail.com');
+
+      expect(await run(['rule', '--profile', 'ai', '--owner', '@acme', 'add']), ExitCodes.ok, reason: '$err');
+      expect(out.toString(), contains('Projects from github.com/acme now use "AI projects"'));
+      out.clear();
+
+      expect(await run(['rule', 'list']), ExitCodes.ok);
+      expect(out.toString(), contains('Projects from github.com/acme  ->  AI projects <dev@ai.example.com>'));
+      expect(out.toString(), contains('Personal <me@gmail.com>'));
+      out.clear();
+
+      // Neither or both of --folder and --owner, a bad owner, an unknown profile.
+      expect(await run(['rule', '--profile', 'ai', 'add']), ExitCodes.usage);
+      expect(await run(['rule', '--profile', 'ai', '--owner', 'a', '--folder', workspace.path, 'add']),
+          ExitCodes.usage);
+      expect(await run(['rule', '--profile', 'ai', '--owner', 'acme/api', 'add']), ExitCodes.usage);
+      expect(await run(['rule', '--profile', 'nobody', '--owner', 'acme', 'add']), ExitCodes.usage);
+
+      expect(await run(['rule', 'remove', 'acme']), ExitCodes.ok);
+      expect(await run(['rule', 'remove', workspace.path]), ExitCodes.ok);
+      expect(await run(['rule', 'remove', workspace.path]), ExitCodes.usage);
+      expect(err.toString(), contains('There is no rule for'));
+      expect(await RepoRuleRepository(paths: paths).getAll(), isEmpty);
+      out.clear();
+      expect(await run(['rule', 'list']), ExitCodes.ok);
+      expect(out.toString(), contains('No rules yet'));
+    });
+
+    test('doctor --fix removes what points at deleted things', () async {
+      await assignWorkspaceTo(aiProfile.copyWith(sshKeyId: 'deleted-key'));
+      await RepoRuleRepository(paths: paths).upsert(
+        RepoRule(id: 'orphan', pathPattern: '${workspace.path}/old', profileId: 'deleted-profile'),
+      );
+
+      await run(['doctor', '--json']);
+      final before = lastJson();
+      final categories = [for (final i in before['issues'] as List) i['category']];
+      expect(categories, containsAll(['orphanedRuleProfile', 'orphanedSshKeyReference']));
+      expect(before.containsKey('fixed'), isFalse);
+
+      await run(['doctor', '--fix', '--json']);
+      final after = lastJson();
+      expect(after['fixed'], hasLength(2), reason: '$after');
+      final left = [for (final i in after['issues'] as List) i['category']];
+      expect(left, isNot(contains('orphanedRuleProfile')));
+      expect(left, isNot(contains('orphanedSshKeyReference')));
+      expect((await ProfileRepository(paths: paths).getAll()).single.sshKeyId, isNull);
+      expect((await RepoRuleRepository(paths: paths).getAll()).map((r) => r.id), ['rule-1']);
+
+      await run(['doctor', '--fix']);
+      expect(out.toString(), isNot(contains('Fixed:')));
+    });
+
+    test("doctor --fix points a company's organization back at the work profile", () async {
+      await assignWorkspaceTo(aiProfile);
+      await run(['profile', '--name', 'Jane', '--email', 'jane@acme.com', '--label', 'Work', 'add']);
+      final file = File('${home.path}/acme.gita.json')
+        ..writeAsStringSync('{"name": "Acme", "emailDomains": ["acme.com"], "github": {"owners": ["acme"]}}');
+      expect(await run(['company', 'import', file.path]), ExitCodes.ok, reason: '$out$err');
+      // Someone points acme at the wrong profile.
+      expect(await run(['rule', '--profile', 'ai', '--owner', 'acme', 'add']), ExitCodes.ok);
+      out.clear();
+
+      expect(await run(['doctor', '--json']), ExitCodes.problem);
+      expect([for (final i in lastJson()['issues'] as List) i['category']], contains('companyEmailMismatch'));
+
+      expect(await run(['doctor', '--fix']), ExitCodes.ok, reason: '$out$err');
+      expect(out.toString(), contains('Fixed: Projects from github.com/acme now use "Work" (jane@acme.com).'));
+      final rule = (await RepoRuleRepository(paths: paths).getAll()).singleWhere((r) => r.isAccountRule);
+      final work = (await ProfileRepository(paths: paths).getAll()).singleWhere((x) => x.label == 'Work');
+      expect(rule.profileId, work.id);
+    });
+
+    test('setup adds a profile per account the projects use', () async {
+      final projects = '${workspace.path}/Projects';
+      await gitRepo('$projects/work/api', 'dev@acme.com');
+      await gitRepo('$projects/mine/blog', 'me@gmail.com');
+
+      expect(await run(['setup', projects]), ExitCodes.ok, reason: '$out$err');
+      expect(out.toString(), contains('Set up 2 profile(s):'));
+      expect(out.toString(), contains('<dev@acme.com>'));
+      expect(out.toString(), contains('gita sign-in --profile'));
+      expect(await ProfileRepository(paths: paths).getAll(), hasLength(2));
+
+      // Running it again reuses the profiles.
+      out.clear();
+      expect(await run(['setup', '--json', projects]), ExitCodes.ok);
+      expect(lastJson()['profiles'], hasLength(2));
+      expect(await ProfileRepository(paths: paths).getAll(), hasLength(2));
+
+      // A folder with no projects, and one that isn't there.
+      final empty = Directory('${workspace.path}/empty')..createSync();
+      expect(await run(['setup', empty.path]), ExitCodes.problem);
+      expect(err.toString(), contains('gita profile add'));
+      expect(await run(['setup', '${workspace.path}/missing']), ExitCodes.usage);
+    });
+  });
 }

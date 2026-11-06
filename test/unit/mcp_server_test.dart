@@ -106,11 +106,30 @@ void main() {
       'gita_profiles',
       'gita_clone',
       'gita_scan',
+      'gita_setup',
+      'gita_profile_add',
+      'gita_profile_edit',
+      'gita_rules',
+      'gita_rule_add',
+      'gita_rule_remove',
+      'gita_company_import',
+      'gita_guard',
+      'gita_sign_in',
     ]);
     for (final t in tools) {
       expect(t['description'], isNotEmpty);
       expect(t['inputSchema']['type'], 'object');
+      expect(t['annotations']['readOnlyHint'], isA<bool>());
     }
+    bool readOnly(String name) => tools.firstWhere((t) => t['name'] == name)['annotations']['readOnlyHint'] as bool;
+    for (final name in ['gita_check', 'gita_which', 'gita_profiles', 'gita_scan', 'gita_rules']) {
+      expect(readOnly(name), isTrue, reason: name);
+    }
+    for (final name in ['gita_setup', 'gita_profile_add', 'gita_rule_add', 'gita_rule_remove', 'gita_sign_in', 'gita_doctor']) {
+      expect(readOnly(name), isFalse, reason: name);
+    }
+    expect(tools.firstWhere((t) => t['name'] == 'gita_rule_remove')['annotations']['destructiveHint'], isTrue);
+    expect(init['instructions'], contains('gita_setup'));
     expect(tools.firstWhere((t) => t['name'] == 'gita_clone')['inputSchema']['required'], ['address']);
   });
 
@@ -212,6 +231,133 @@ void main() {
     seen.clear();
     await server.handleLine(jsonEncode(call(2, 'gita_clone', {'address': 'git@github.com:acme/api.git'})));
     expect(seen.single, ['clone', 'git@github.com:acme/api.git', '--json']);
+  });
+
+  test('the tools that change things map to the right gita commands', () async {
+    final seen = <List<String>>[];
+    final server = GitaMcpServer(
+      output: StringBuffer(),
+      run: (args) async {
+        seen.add(args);
+        return (exitCode: 0, out: '{"ok":true}', err: '');
+      },
+    );
+    Future<List<String>> args(String tool, Map<String, Object> a) async {
+      seen.clear();
+      final reply = await server.handleLine(jsonEncode(call(1, tool, a)));
+      expect(reply!['error'], isNull, reason: '$tool: ${reply['error']}');
+      return seen.single;
+    }
+
+    expect(await args('gita_setup', {}), ['setup', '--json', '--']);
+    expect(
+      await args('gita_setup', {
+        'folders': ['/p/a', ' /p/b '],
+        'only': ['me@acme.com'],
+        'track': false,
+      }),
+      ['setup', '--only', 'me@acme.com', '--no-track', '--json', '--', '/p/a', '/p/b'],
+    );
+    expect(await args('gita_profile_add', {'name': 'Jane', 'email': 'j@acme.com', 'label': 'Work', 'folders': ['/w']}),
+        ['profile', '--name', 'Jane', '--email', 'j@acme.com', '--label', 'Work', '--folder', '/w', 'add', '--json']);
+    expect(await args('gita_profile_edit', {'profile': '--evil', 'githubLogin': 'jane'}),
+        ['profile', '--github-login', 'jane', '--json', '--', 'edit', '--evil'],
+        reason: 'a name starting with -- is not read as an option');
+    expect(await args('gita_rules', {}), ['rule', 'list', '--json']);
+    expect(await args('gita_rule_add', {'profile': 'Work', 'owner': 'acme'}),
+        ['rule', '--profile', 'Work', '--owner', 'acme', 'add', '--json']);
+    expect(await args('gita_rule_remove', {'rule': 'github.com/acme'}),
+        ['rule', '--json', '--', 'remove', 'github.com/acme']);
+    expect(await args('gita_company_import', {'file': '/c/acme.gita.json'}),
+        ['company', '--json', '--', 'import', '/c/acme.gita.json']);
+    expect(await args('gita_guard', {'action': 'install', 'path': '/p/a'}), ['guard', '--json', '--', 'install', '/p/a']);
+    expect(await args('gita_sign_in', {'profile': 'Work'}), ['sign-in', '--profile', 'Work', '--no-wait', '--json']);
+    expect(await args('gita_doctor', {'fix': true}), ['doctor', '--fix', '--json']);
+    expect(await args('gita_doctor', {}), ['doctor', '--json']);
+
+    for (final bad in [
+      call(1, 'gita_guard', {'action': 'delete', 'path': '/p'}),
+      call(2, 'gita_profile_add', {'name': 'Jane'}),
+      call(3, 'gita_rule_remove', {}),
+      call(4, 'gita_sign_in', {}),
+    ]) {
+      final reply = await server.handleLine(jsonEncode(bad));
+      expect((reply!['error'] as Map)['code'], -32602, reason: '$bad');
+    }
+  });
+
+  test('Claude can set Gita up from scratch through the tools', () async {
+    Future<void> repo(String path, String email) async {
+      final dir = Directory(path)..createSync(recursive: true);
+      for (final args in [
+        ['init', '-q'],
+        ['config', 'user.email', email],
+        ['config', 'user.name', 'Dev'],
+      ]) {
+        expect((await git.raw(args, workingDir: dir.path)).exitCode, 0);
+      }
+    }
+
+    final projects = p.join(home.path, 'Projects');
+    await repo(p.join(projects, 'work', 'api'), 'dev@acme.com');
+    await repo(p.join(projects, 'work', 'web'), 'dev@acme.com');
+    await repo(p.join(projects, 'mine', 'blog'), 'me@gmail.com');
+    final other = p.join(home.path, 'Elsewhere');
+    Directory(other).createSync();
+
+    final replies = await talk([
+      call(1, 'gita_setup', {'folders': [projects], 'only': ['dev@acme.com']}),
+      call(2, 'gita_profile_add', {'name': 'Me', 'email': 'me@gmail.com', 'label': 'Personal', 'folders': [other]}),
+      call(3, 'gita_rule_add', {'profile': 'Personal', 'owner': 'my-gh'}),
+      call(4, 'gita_profile_edit', {'profile': 'Personal', 'githubLogin': 'my-gh'}),
+      call(5, 'gita_rules'),
+      call(6, 'gita_rule_remove', {'rule': 'github.com/my-gh'}),
+      call(7, 'gita_profiles'),
+      call(8, 'gita_check', {'path': p.join(projects, 'work', 'api')}),
+      call(9, 'gita_doctor', {'fix': true}),
+      call(10, 'gita_setup', {'folders': [projects], 'only': ['nobody@x.com']}),
+    ]);
+    Map<String, dynamic> body(int i) {
+      final result = replies[i]['result'] as Map<String, dynamic>;
+      final json = jsonDecode((result['content'] as List).single['text'] as String) as Map<String, dynamic>;
+      return {...json, 'isError': result['isError']};
+    }
+
+    final setup = body(0);
+    expect(setup['ok'], isTrue, reason: '$setup');
+    expect(setup['profiles'], hasLength(1));
+    expect(setup['profiles'][0]['email'], 'dev@acme.com');
+    expect(setup['projects'], 2);
+    expect(setup['needSignIn'], [setup['profiles'][0]['id']]);
+
+    final added = body(1);
+    expect(added['ok'], isTrue, reason: '$added');
+    expect(added['profile']['label'], 'Personal');
+
+    expect(body(2)['ok'], isTrue, reason: '${body(2)}');
+    expect(body(3)['profile']['githubLogin'], 'my-gh');
+
+    final rules = (body(4)['rules'] as List).cast<Map<String, dynamic>>();
+    expect(rules.where((r) => r['kind'] == 'account').single['covers'], 'github.com/my-gh');
+    expect(rules.where((r) => r['kind'] == 'folder').map((r) => r['profile']), containsAll(['Personal']));
+
+    expect(body(5)['ok'], isTrue);
+    final profiles = (body(6)['profiles'] as List).cast<Map<String, dynamic>>();
+    expect(profiles.map((x) => x['email']), unorderedEquals(['dev@acme.com', 'me@gmail.com']));
+    expect(profiles.firstWhere((x) => x['label'] == 'Personal')['accounts'], isEmpty);
+
+    final check = body(7);
+    expect(check['expectedProfile']['email'], 'dev@acme.com', reason: '$check');
+
+    expect(body(8)['fixed'], isA<List<dynamic>>());
+
+    final unknown = body(9);
+    expect(unknown['isError'], isTrue);
+    expect(unknown['error'], contains('dev@acme.com'), reason: 'says which accounts it did find');
+
+    // git itself now uses the work account in the work projects.
+    final email = await git.raw(['config', 'user.email'], workingDir: p.join(projects, 'work', 'api'));
+    expect(email.stdout.toString().trim(), 'dev@acme.com');
   });
 
   group('mcp add-to-claude', () {

@@ -108,6 +108,16 @@ or run this one command:
 
 (Do one or the other, not both.)
 
+Once it's connected, Claude can also do the setup in Part 2 for you. Put
+the company file somewhere on your computer and tell Claude something like:
+
+> Set up Gita for me. The company file is in my Downloads folder.
+
+Claude finds your accounts, asks which ones to set up, and tells you
+before each change. When a profile needs to sign in to GitHub, Claude
+gives you a code to enter on github.com. You never give Claude your
+password.
+
 ## Questions people ask
 
 **Will this change my existing projects?** Only their git settings for

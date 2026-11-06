@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+export '../core/services/setup_service.dart' show profileColorPalette;
+
 /// Brand palette, lifted from assets/branding — a deep indigo/navy paired
 /// with an electric blue and a teal-green accent.
 class GitaColors {
@@ -18,16 +20,6 @@ class GitaColors {
   static const red = Color(0xFFEF4444);
 }
 
-const _profileColorPalette = [
-  0xFF3D5AFE,
-  0xFF00BFA5,
-  0xFFFF6D00,
-  0xFFD500F9,
-  0xFFC51162,
-  0xFF64DD17,
-];
-
-List<int> get profileColorPalette => _profileColorPalette;
 
 ThemeData buildTheme(Brightness brightness) {
   final isDark = brightness == Brightness.dark;
