@@ -109,7 +109,13 @@ void main() {
     expect(content, contains('# >>> Gita managed rules'));
     expect(content, contains('# <<< Gita managed rules'));
     expect(content, contains('[includeIf "gitdir/i:/Users/me/work/"]'));
-    expect(content, contains('path = ${paths.profilesDir}/p1.gitconfig'));
+    // Git config paths are always written with forward slashes: a backslash
+    // is an escape character in git config values, so the native Windows
+    // form would break the include.
+    expect(
+      content,
+      contains('path = ${paths.toGitConfigPath('${paths.profilesDir}/p1.gitconfig')}'),
+    );
   });
 
   test('syncManagedIncludeIfBlock never touches content outside the markers', () async {

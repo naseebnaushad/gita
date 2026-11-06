@@ -81,13 +81,18 @@ void main() {
 
     // gitdir matching is against the resolved (symlink-free) path, which on
     // macOS differs from the raw systemTemp path (/var is a symlink into
-    // /private/var).
-    final resolvedRepoPath = Directory(tempRepo.path).resolveSymbolicLinksSync();
+    // /private/var). Both the pattern and the include path must use forward
+    // slashes: on Windows a backslash is an escape character in git config,
+    // so the native form makes git reject the line outright.
+    final resolvedRepoPath = Directory(tempRepo.path)
+        .resolveSymbolicLinksSync()
+        .replaceAll('\\', '/');
+    final includePath = includedConfig.path.replaceAll('\\', '/');
     final localConfig = File('${tempRepo.path}/.git/config');
     final original = await localConfig.readAsString();
     await localConfig.writeAsString(
-      '$original\n[includeIf "gitdir:$resolvedRepoPath/"]\n'
-      '    path = ${includedConfig.path}\n',
+      '$original\n[includeIf "gitdir/i:$resolvedRepoPath/"]\n'
+      '    path = $includePath\n',
     );
 
     final value = await git.getConfigValue(tempRepo.path, 'user.email');
