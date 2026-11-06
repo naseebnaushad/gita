@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../../app/theme.dart';
 import '../../core/models/profile.dart';
+import '../../core/models/ssh_key.dart';
 import '../../core/providers.dart';
 import '../../core/services/github_device_flow.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/initials_avatar.dart';
 import '../../widgets/screen_header.dart';
 import 'github_sign_in_dialog.dart';
+import 'ssh_setup_dialog.dart';
 
 class ProfilesScreen extends ConsumerWidget {
   const ProfilesScreen({super.key});
@@ -215,6 +218,9 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
   /// The GitHub account the token belongs to, when it came from signing in.
   String? _githubLogin;
 
+  /// The profile's SSH key, saved with the profile.
+  String? _sshKeyId;
+
   @override
   void initState() {
     super.initState();
@@ -226,6 +232,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     _signByDefault = e?.signCommitsByDefault ?? false;
     _colorArgb = e?.colorArgb ?? profileColorPalette[0];
     _githubLogin = e?.githubLogin;
+    _sshKeyId = e?.sshKeyId;
     if (e != null) {
       ref.read(secureTokenServiceProvider).readToken(e.id).then((token) {
         if (!mounted || token == null) return;
@@ -295,6 +302,8 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
               ),
               const SizedBox(height: 14),
               _gitHubSection(context),
+              const SizedBox(height: 14),
+              _sshSection(context),
               const SizedBox(height: 8),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -420,6 +429,73 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     );
   }
 
+  Widget _sshSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final keys = ref.watch(sshKeysProvider).value ?? const [];
+    final key = keys.where((k) => k.id == _sshKeyId).firstOrNull;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('SSH (for git@github.com remotes)',
+            style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 8),
+        if (key == null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: () => _setUpSsh(null),
+              icon: const Icon(Icons.key, size: 18),
+              label: const Text('Set up SSH'),
+            ),
+          )
+        else
+          Row(
+            children: [
+              Icon(Icons.key, size: 18, color: scheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Tooltip(
+                  message: key.privateKeyPath,
+                  child: Text(
+                    p.basename(key.privateKeyPath),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              TextButton(onPressed: () => _setUpSsh(key), child: const Text('Check')),
+              TextButton(
+                onPressed: () => setState(() => _sshKeyId = null),
+                child: const Text('Remove'),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Future<void> _setUpSsh(SshKey? existing) async {
+    final label = _labelController.text.trim().isEmpty
+        ? (_githubLogin ?? 'profile')
+        : _labelController.text.trim();
+    final key = await showDialog<SshKey>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => SshSetupDialog(
+        sshKeys: ref.read(sshKeyServiceProvider),
+        gitHub: ref.read(gitHubSshKeysProvider),
+        profileLabel: label,
+        email: _emailController.text.trim(),
+        existing: existing,
+        token: _tokenController.text,
+        expectedLogin: _githubLogin,
+        onKeyCreated: (k) => ref.read(sshKeysProvider.notifier).upsert(k),
+      ),
+    );
+    if (key != null && mounted) setState(() => _sshKeyId = key.id);
+  }
+
   Future<void> _signIn(GitHubDeviceFlow flow) async {
     final result = await showDialog<GitHubSignInResult>(
       context: context,
@@ -457,7 +533,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
       label: _labelController.text.trim(),
       gitName: _nameController.text.trim(),
       gitEmail: _emailController.text.trim(),
-      sshKeyId: existing?.sshKeyId,
+      sshKeyId: _sshKeyId,
       gpgKeyId: existing?.gpgKeyId,
       githubLogin: _tokenController.text.trim().isEmpty ? null : _githubLogin,
       signCommitsByDefault: _signByDefault,

@@ -48,7 +48,16 @@ void main() {
 
     final content = await File('${paths.profilesDir}/p1.gitconfig').readAsString();
     expect(content, contains('[core]'));
-    expect(content, contains('sshCommand = ssh -i ~/.ssh/id_work'));
+    expect(content, contains('sshCommand = "ssh -i ~/.ssh/id_work"'));
+  });
+
+  test('git reads core.sshCommand back unchanged, quotes and all', () async {
+    const command = 'ssh -i "C:/Users/A B/.ssh/gita_work" -o IdentitiesOnly=yes';
+    await service.writeProfileConfigFile(makeProfile('p1', 'work'), sshCommand: command);
+
+    final result = await Process.run(
+        'git', ['config', '-f', '${paths.profilesDir}/p1.gitconfig', 'core.sshCommand']);
+    expect((result.stdout as String).trim(), command);
   });
 
   group('HTTPS credential helper', () {

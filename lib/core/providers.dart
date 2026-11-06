@@ -10,12 +10,14 @@ import 'services/git_service.dart';
 import 'services/gitconfig_service.dart';
 import 'services/github_device_flow.dart';
 import 'services/github_oauth_config.dart';
+import 'services/github_ssh_keys.dart';
 import 'services/gpg_service.dart';
 import 'services/identity_doctor_service.dart';
 import 'services/mismatch_detector.dart';
 import 'services/platform_paths.dart';
 import 'services/secure_token_service.dart';
 import 'services/ssh_config_service.dart';
+import 'services/ssh_key_service.dart';
 import 'storage/repositories.dart';
 
 final platformPathsProvider = Provider((ref) => const PlatformPaths());
@@ -55,6 +57,11 @@ final gitHubDeviceFlowProvider = Provider<GitHubDeviceFlow?>((ref) {
   final clientId = resolveGitHubClientId();
   return clientId == null ? null : GitHubDeviceFlow(clientId: clientId);
 });
+
+final sshKeyServiceProvider =
+    Provider((ref) => SshKeyService(paths: ref.watch(platformPathsProvider)));
+
+final gitHubSshKeysProvider = Provider((ref) => GitHubSshKeys());
 
 final cliInstallerProvider =
     Provider((ref) => CliInstaller(paths: ref.watch(platformPathsProvider)));
@@ -121,9 +128,15 @@ class ProfilesNotifier extends AsyncNotifier<List<Profile>> {
     final profiles = state.value ?? [];
     final gitConfigService = ref.read(gitConfigServiceProvider);
     final tokens = ref.read(secureTokenServiceProvider);
+    final sshKeyService = ref.read(sshKeyServiceProvider);
+    final sshKeys = {
+      for (final k in await ref.read(sshKeyRepositoryProvider).getAll()) k.id: k,
+    };
     for (final profile in profiles) {
+      final sshKey = sshKeys[profile.sshKeyId];
       await gitConfigService.writeProfileConfigFile(
         profile,
+        sshCommand: sshKey == null ? null : sshKeyService.sshCommandFor(sshKey),
         useCredentialHelper: await tokens.hasToken(profile.id),
       );
     }

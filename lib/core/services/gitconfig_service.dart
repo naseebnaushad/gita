@@ -46,7 +46,9 @@ class GitConfigService {
     if (sshCommand != null && sshCommand.isNotEmpty) {
       buffer
         ..writeln('[core]')
-        ..writeln('    sshCommand = $sshCommand');
+        // Quoted: the command holds a quoted key path, and git would
+        // otherwise strip those quotes when reading the value.
+        ..writeln('    sshCommand = ${_quoteConfigValue(sshCommand)}');
     }
 
     if (profile.signCommitsByDefault) {

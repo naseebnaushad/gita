@@ -24,9 +24,16 @@ class GitHubDeviceFlow {
 
   /// What a pushed-from token needs: `repo` to push to private repos,
   /// `workflow` so pushes that touch `.github/workflows` aren't rejected,
-  /// and `read:user`/`user:email` to show who signed in and fill in the
-  /// commit name and email.
-  static const scopes = ['repo', 'workflow', 'read:user', 'user:email'];
+  /// `read:user`/`user:email` to show who signed in and fill in the
+  /// commit name and email, and `write:public_key` so Gita can add the
+  /// profile's SSH key to the account by itself.
+  static const scopes = [
+    'repo',
+    'workflow',
+    'read:user',
+    'user:email',
+    'write:public_key',
+  ];
 
   static final _deviceCodeUri = Uri.parse('https://github.com/login/device/code');
   static final _tokenUri = Uri.parse('https://github.com/login/oauth/access_token');
@@ -240,13 +247,16 @@ class GitHubResponse {
   final String body;
 }
 
-/// The two HTTP calls the device flow needs, so tests can fake GitHub.
+/// The HTTP calls Gita makes to GitHub, so tests can fake GitHub.
 abstract class GitHubHttp {
   /// Form POST that asks for a JSON answer.
   Future<GitHubResponse> post(Uri uri, Map<String, String> form);
 
-  /// API GET authorised with [token].
+  /// API GET authorised with [token] (sent without one when it is empty).
   Future<GitHubResponse> get(Uri uri, String token);
+
+  /// API POST of a JSON [body], authorised with [token].
+  Future<GitHubResponse> postJson(Uri uri, String token, Map<String, Object?> body);
 }
 
 class IoGitHubHttp implements GitHubHttp {
@@ -271,12 +281,27 @@ class IoGitHubHttp implements GitHubHttp {
   @override
   Future<GitHubResponse> get(Uri uri, String token) async {
     final request = await _client.getUrl(uri).timeout(_timeout);
+    _apiHeaders(request, token);
+    return _read(await request.close().timeout(_timeout));
+  }
+
+  @override
+  Future<GitHubResponse> postJson(Uri uri, String token, Map<String, Object?> body) async {
+    final request = await _client.postUrl(uri).timeout(_timeout);
+    _apiHeaders(request, token);
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode(body));
+    return _read(await request.close().timeout(_timeout));
+  }
+
+  static void _apiHeaders(HttpClientRequest request, String token) {
     request.headers
       ..set(HttpHeaders.acceptHeader, 'application/vnd.github+json')
       ..set(HttpHeaders.userAgentHeader, _userAgent)
-      ..set(HttpHeaders.authorizationHeader, 'Bearer $token')
       ..set('X-GitHub-Api-Version', '2022-11-28');
-    return _read(await request.close().timeout(_timeout));
+    if (token.isNotEmpty) {
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+    }
   }
 
   static Future<GitHubResponse> _read(HttpClientResponse response) async {

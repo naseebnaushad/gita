@@ -4,7 +4,14 @@ import 'package:gita/core/services/github_device_flow.dart';
 
 /// Plays GitHub's side of the device flow from a script of answers.
 class FakeGitHub implements GitHubHttp {
-  FakeGitHub({required this.tokenAnswers, this.deviceAnswer, this.user, this.emails});
+  FakeGitHub({
+    this.tokenAnswers = const [],
+    this.deviceAnswer,
+    this.user,
+    this.emails,
+    this.addKeyAnswer = const GitHubResponse(201, '{}'),
+    this.meta,
+  });
 
   /// Answers to successive polls of /login/oauth/access_token.
   final List<Map<String, Object?>> tokenAnswers;
@@ -12,8 +19,15 @@ class FakeGitHub implements GitHubHttp {
   final Map<String, Object?>? user;
   final List<Object?>? emails;
 
+  /// What POST /user/keys answers.
+  final GitHubResponse addKeyAnswer;
+
+  /// What GET /meta answers with.
+  final Map<String, Object?>? meta;
+
   final posts = <(Uri, Map<String, String>)>[];
   final gets = <(Uri, String)>[];
+  final jsonPosts = <(Uri, String, Map<String, Object?>)>[];
   var polls = 0;
 
   @override
@@ -42,6 +56,16 @@ class FakeGitHub implements GitHubHttp {
           ? const GitHubResponse(403, '{}')
           : GitHubResponse(200, jsonEncode(emails));
     }
+    if (uri.path == '/meta') {
+      return meta == null ? const GitHubResponse(500, '') : GitHubResponse(200, jsonEncode(meta));
+    }
+    return const GitHubResponse(404, '{}');
+  }
+
+  @override
+  Future<GitHubResponse> postJson(Uri uri, String token, Map<String, Object?> body) async {
+    jsonPosts.add((uri, token, body));
+    if (uri.path == '/user/keys') return addKeyAnswer;
     return const GitHubResponse(404, '{}');
   }
 }
