@@ -1,0 +1,10 @@
+{
+  "name": "gita",
+  "version": "0.1.0",
+  "description": "Lets Claude Code ask Gita which GitHub account a project uses before it commits, pushes or clones.",
+  "homepage": "https://github.com/naseebnaushad/gita",
+  "author": {
+    "name": "naseebnaushad",
+    "url": "https://github.com/naseebnaushad"
+  }
+}

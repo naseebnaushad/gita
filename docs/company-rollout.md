@@ -90,13 +90,23 @@ That's it. From now on:
 
 ### Using an AI coding tool?
 
-If you use Claude Code, run this once so it checks with Gita before it
-commits, pushes or clones:
+If you use Claude Code, connect it to Gita once, so it checks with Gita
+before it commits, pushes or clones. Either type these two lines into
+Claude Code:
+
+```
+/plugin marketplace add naseebnaushad/gita
+/plugin install gita@gita
+```
+
+or run this one command:
 
 - Windows: open **Command Prompt** and run
   `%USERPROFILE%\.gita\bin\gita.exe mcp add-to-claude`
 - macOS or Linux: open **Terminal** and run
   `~/.gita/bin/gita mcp add-to-claude`
+
+(Do one or the other, not both.)
 
 ## Questions people ask
 

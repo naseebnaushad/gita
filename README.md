@@ -83,6 +83,15 @@ Run the test suite with:
 flutter test
 ```
 
+`integration_test/` drives the real app on this computer: first-start
+setup, cloning a project from GitHub and importing a company setup. It
+changes git settings, so run it through the script, which uses a
+throwaway home folder (Windows):
+
+```
+powershell -ExecutionPolicy Bypass -File tool\run_integration_test.ps1
+```
+
 ## Command line
 
 Gita also ships a small `gita` command for git hooks, scripts and AI
@@ -236,6 +245,20 @@ command into `~/.gita/bin`), then run this once:
 
 It runs `claude mcp add --scope user gita -- <path to gita> mcp` for you,
 so it works in every project. Restart open Claude Code sessions after.
+
+Or install the **Claude Code plugin** in `claude-plugin/`. It adds the
+same server plus a skill that tells Claude when to use it (check before
+committing or pushing, clone through Gita, explain problems in plain
+words). In Claude Code:
+
+```
+/plugin marketplace add naseebnaushad/gita
+/plugin install gita@gita
+```
+
+(Use one or the other, not both, or Claude sees the tools twice.) The
+plugin starts `~/.gita/bin/gita mcp` through `git`, which is on every
+computer that uses Gita and finds the home folder on Windows too.
 Other MCP tools can start the same command: `<path to gita> mcp` (stdio).
 The safety check in each project still stops a wrong-account commit
 even if an agent ignores the advice.

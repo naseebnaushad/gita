@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "gita": {
+      "command": "git",
+      "args": ["-c", "alias.gita-mcp=!\"$HOME/.gita/bin/gita\" mcp", "gita-mcp"]
+    }
+  }
+}
