@@ -59,8 +59,18 @@ push where the effective identity doesn't match what's expected for that repo.
   with a one-click fix: turn off signing, stop using a missing SSH key or
   set up a new one, delete a rule whose profile is gone, sign in with
   GitHub, or install the `gita` command.
+- **AI coding agents** — `gita mcp add-to-claude` lets Claude Code ask
+  Gita which account a project uses before it commits, pushes or clones.
 
 ## Getting started
+
+**Using Gita:** download it from the
+[Releases](https://github.com/naseebnaushad/gita/releases) page
+(`gita-windows-x64.zip`, `gita-macos.zip` or `gita-linux-x64.tar.gz`),
+unpack it and open `gita`. Rolling it out at a company? See
+[docs/company-rollout.md](docs/company-rollout.md).
+
+**Working on Gita:**
 
 ```
 flutter pub get
@@ -92,6 +102,7 @@ gita company list      # company setups on this computer
 gita guard install [folder]   # add the safety check to a project (the app does this for you)
 gita guard remove [folder]    # take it out again
 gita guard status [folder]    # is it in place?
+gita mcp add-to-claude        # let Claude Code ask Gita (see below)
 ```
 
 Add `--json` to any command for machine-readable output. Exit codes:
@@ -199,6 +210,48 @@ After that, Doctor warns when:
 
 The first two have a one-click fix in the app; for the last, add a
 profile with the company email first.
+
+### AI coding agents (Claude Code and other MCP tools)
+
+An AI agent that commits or clones for you can use the wrong account just
+like a person can. `gita mcp` is a small [MCP](https://modelcontextprotocol.io)
+server that gives agents Gita's answers as tools:
+
+| Tool | What it does |
+| --- | --- |
+| `gita_check` | Will this project commit and push with the right account? Agents are told to call it before committing or pushing, and to stop and explain if it says no. |
+| `gita_which` | Which account this project should use, and why. |
+| `gita_clone` | Download a project with the right account (instead of `git clone`). |
+| `gita_doctor` | Setup problems and how to fix them. |
+| `gita_profiles` | The accounts on this computer. |
+| `gita_scan` | Suggest profiles from the projects on this computer (changes nothing). |
+
+To connect **Claude Code**, open Gita once (it installs the `gita`
+command into `~/.gita/bin`), then run this once:
+
+```
+~/.gita/bin/gita mcp add-to-claude                  # macOS / Linux
+%USERPROFILE%\.gita\bin\gita.exe mcp add-to-claude  # Windows (Command Prompt)
+```
+
+It runs `claude mcp add --scope user gita -- <path to gita> mcp` for you,
+so it works in every project. Restart open Claude Code sessions after.
+Other MCP tools can start the same command: `<path to gita> mcp` (stdio).
+The safety check in each project still stops a wrong-account commit
+even if an agent ignores the advice.
+
+### Releases
+
+The **Build** workflow (`.github/workflows/build.yml`) runs the tests on
+every pull request and builds Windows, macOS and Linux versions, each with
+the `gita` command inside and checked to run. The builds can be
+downloaded from the run's **Artifacts**. Pushing a tag like `v1.2.0`
+also makes a draft release with the three downloads; check it, then press
+**Publish**.
+
+The macOS build is signed ad hoc (fine for trying it; macOS asks to
+confirm on first open: right-click -> **Open**). To hand it to many
+people, sign and notarize it with an Apple Developer ID.
 
 ### The safety check: wrong-account commits and pushes are stopped
 

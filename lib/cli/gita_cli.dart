@@ -24,6 +24,7 @@ import '../core/services/push_guard.dart';
 import '../core/services/ssh_config_service.dart';
 import '../core/services/token_store.dart';
 import '../core/storage/repositories.dart';
+import 'mcp_server.dart';
 
 /// Exit codes shared by every command, so hooks and agent integrations can
 /// branch on them without parsing output.
@@ -38,6 +39,9 @@ abstract final class ExitCodes {
   /// The command couldn't run: bad arguments, or not inside a git project.
   static const usage = 2;
 }
+
+/// Runs another program and waits for it.
+typedef ProcessRunner = Future<ProcessResult> Function(String executable, List<String> arguments);
 
 /// Headless entry point to Gita's core services.
 ///
@@ -60,7 +64,9 @@ class GitaCli {
     this.cwd = '.',
     this.deviceFlow,
     Future<bool> Function(Uri url)? openBrowser,
-  })  : tokenStore = tokenStore ?? TokenStore(),
+    ProcessRunner? runProcess,
+  })  : runProcess = runProcess ?? _defaultRunProcess,
+        tokenStore = tokenStore ?? TokenStore(),
         openBrowser = openBrowser ?? defaultOpenBrowser {
     this.doctorService = doctorService ??
         IdentityDoctorService(paths: paths, tokenStore: this.tokenStore);
@@ -85,6 +91,12 @@ class GitaCli {
 
   /// Opens the GitHub sign-in page for `gita sign-in`.
   final Future<bool> Function(Uri url) openBrowser;
+
+  /// Runs other programs (`gita mcp add-to-claude` runs `claude`).
+  final ProcessRunner runProcess;
+
+  static Future<ProcessResult> _defaultRunProcess(String executable, List<String> arguments) =>
+      Process.run(executable, arguments, runInShell: Platform.isWindows);
 
   static const version = '0.1.0';
 
@@ -119,6 +131,7 @@ class GitaCli {
           ..addFlag('with-token', negatable: false, help: 'Read a token from stdin.')
           ..addFlag('no-browser', negatable: false, help: "Don't open the browser."),
       )
+      ..addCommand('mcp', command())
       ..addCommand('hook', ArgParser(allowTrailingOptions: false))
       ..addCommand(
         'credential',
@@ -190,6 +203,8 @@ class GitaCli {
         return _signIn(command, json: json);
       case 'company':
         return _company(command, json: json);
+      case 'mcp':
+        return _mcp(command.rest, json: json);
     }
     return ExitCodes.usage;
   }
@@ -234,6 +249,12 @@ Commands:
                    wherever it is on this computer. Without --profile,
                    Gita picks the profile with a company email.
   company list     Show the company setups on this computer.
+  mcp add-to-claude
+                   Let Claude Code (the AI coding tool) ask Gita which
+                   account to use before it commits, pushes or clones.
+                   Run once; needs Claude Code installed.
+  mcp              Run Gita for AI tools (MCP). AI tools start this by
+                   themselves; you don't need to run it.
   sign-in --profile <name or id>
                    Sign a profile in to GitHub (shows a code to enter on
                    github.com), so HTTPS pushes use that account.
@@ -252,6 +273,98 @@ Options:
 
 Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
 ''';
+
+  // ------------------------------------------------------------------ mcp
+
+  Future<int> _mcp(List<String> rest, {required bool json}) async {
+    if (rest.isEmpty) {
+      final server = GitaMcpServer(
+        version: version,
+        output: out,
+        run: (args) async {
+          final o = StringBuffer();
+          final e = StringBuffer();
+          final code = await GitaCli(
+            out: o,
+            err: e,
+            paths: paths,
+            gitService: gitService,
+            doctorService: doctorService,
+            tokenStore: tokenStore,
+            cwd: cwd,
+            deviceFlow: deviceFlow,
+            openBrowser: openBrowser,
+            runProcess: runProcess,
+            // Tools must never wait for typing: stdin carries MCP messages.
+            input: const Stream<List<int>>.empty(),
+          ).run(args);
+          return (exitCode: code, out: o.toString(), err: e.toString());
+        },
+      );
+      await server.serve(
+        (input ?? stdin).transform(utf8.decoder).transform(const LineSplitter()),
+      );
+      return ExitCodes.ok;
+    }
+    if (rest.length == 1 && rest.first == 'add-to-claude') {
+      return _mcpAddToClaude(json: json);
+    }
+    err
+      ..writeln('Unknown: gita mcp ${rest.join(' ')}')
+      ..writeln('Use "gita mcp add-to-claude" to connect Claude Code to Gita.');
+    return ExitCodes.usage;
+  }
+
+  Future<int> _mcpAddToClaude({required bool json}) async {
+    final exe = File(paths.cliPath).existsSync() ? paths.cliPath : Platform.resolvedExecutable;
+    final name = p.basenameWithoutExtension(exe).toLowerCase();
+    if (name != 'gita') {
+      // Running from source (`dart run`): there's no gita program to point at.
+      err.writeln("Couldn't find the installed gita program. Open the Gita app once "
+          '(it installs it), then try again.');
+      return ExitCodes.usage;
+    }
+    final args = ['mcp', 'add', '--transport', 'stdio', '--scope', 'user', 'gita', '--', exe, 'mcp'];
+    final manual = 'claude ${args.map(_quoteArg).join(' ')}';
+
+    ProcessResult? result;
+    try {
+      // Replace an older entry (e.g. one pointing at a previous location).
+      await runProcess('claude', ['mcp', 'remove', '--scope', 'user', 'gita']);
+      result = await runProcess('claude', args);
+    } on ProcessException {
+      result = null;
+    }
+    if (result != null && result.exitCode != 0) {
+      final text = '${result.stderr} ${result.stdout}'.toLowerCase();
+      if (result.exitCode == 127 || text.contains('not recognized') || text.contains('not found')) {
+        result = null; // The shell couldn't find claude.
+      }
+    }
+    final ok = result != null && result.exitCode == 0;
+    if (json) {
+      out.writeln(jsonEncode({
+        'ok': ok,
+        'command': manual,
+        if (result != null && !ok) 'error': '${result.stderr}'.trim(),
+      }));
+    } else if (ok) {
+      out
+        ..writeln('Done. Claude Code can now ask Gita which account to use.')
+        ..writeln('Restart any open Claude Code sessions to pick it up.');
+    } else {
+      final why = result == null ? 'Claude Code (the "claude" command) isn\'t installed.' : '${result.stderr}'.trim();
+      err
+        ..writeln("Couldn't connect Claude Code to Gita.")
+        ..writeln(why)
+        ..writeln()
+        ..writeln('Once Claude Code is installed, run this again, or run:')
+        ..writeln('  $manual');
+    }
+    return ok ? ExitCodes.ok : ExitCodes.problem;
+  }
+
+  static String _quoteArg(String a) => a.contains(' ') ? '"$a"' : a;
 
   // ------------------------------------------------------------- profiles
 
