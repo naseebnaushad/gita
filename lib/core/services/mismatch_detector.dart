@@ -3,6 +3,7 @@ import '../models/profile.dart';
 import '../models/repo_rule.dart';
 import '../models/ssh_key.dart';
 import 'git_service.dart';
+import 'hook_service.dart';
 import 'ssh_config_service.dart';
 
 /// Implements the mismatch-detection algorithm from plan §6.3. This same
@@ -14,10 +15,15 @@ class MismatchDetector {
   MismatchDetector({
     this.gitService = const GitService(),
     SshConfigService? sshConfigService,
+    this.hookService,
   }) : sshConfigService = sshConfigService ?? SshConfigService();
 
   final GitService gitService;
   final SshConfigService sshConfigService;
+
+  /// When set, a project without Gita's safety check (or with an old one)
+  /// gets a [MismatchType.hookMissing] warning.
+  final HookService? hookService;
 
   /// Returns null when the repo is fully consistent with its expected
   /// profile (no report needed for a clean repo).
@@ -89,6 +95,22 @@ class MismatchDetector {
             severity: Severity.blocking,
           );
         }
+      }
+    }
+
+    final hooks = hookService;
+    if (hooks != null) {
+      final guard = await hooks.status(repoPath);
+      if (guard.state == GuardState.missing || guard.state == GuardState.outdated) {
+        return MismatchReport(
+          repoPath: repoPath,
+          type: MismatchType.hookMissing,
+          detail: guard.state == GuardState.outdated
+              ? 'The safety check in this project is from an older Gita.'
+              : "This project doesn't have Gita's safety check, so a commit "
+                  'or push with the wrong account would not be stopped.',
+          severity: Severity.warning,
+        );
       }
     }
 

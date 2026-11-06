@@ -7,6 +7,7 @@ import 'package:gita/core/models/profile.dart';
 import 'package:gita/core/models/repo_rule.dart';
 import 'package:gita/core/services/git_service.dart';
 import 'package:gita/core/services/gitconfig_service.dart';
+import 'package:gita/core/services/hook_service.dart';
 import 'package:gita/core/services/keychain_store.dart';
 import 'package:gita/core/services/path_resolver.dart';
 import 'package:gita/core/services/platform_paths.dart';
@@ -86,12 +87,23 @@ void main() {
   group('check', () {
     test('passes when the folder rule gives the expected identity', () async {
       await assignWorkspaceTo(aiProfile);
+      await HookService(paths: paths, git: git).install(repoPath);
 
       final code = await run(['check', repoPath]);
 
       expect(code, ExitCodes.ok, reason: '$out$err');
       expect(out.toString(), contains('AI projects <dev@ai.example.com>'));
       expect(out.toString(), contains('All good'));
+    });
+
+    test('passes but gives a heads-up when the safety check is missing', () async {
+      await assignWorkspaceTo(aiProfile);
+
+      final code = await run(['check', repoPath]);
+
+      expect(code, ExitCodes.ok, reason: '$out$err');
+      expect(out.toString(), contains("doesn't have Gita's safety check"));
+      expect(out.toString(), contains('gita guard install'));
     });
 
     test('fails when a repo-local email overrides the profile', () async {

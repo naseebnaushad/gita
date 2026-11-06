@@ -72,7 +72,12 @@ class DashboardScreen extends ConsumerWidget {
       return;
     }
     final top = await git.topLevel(dir) ?? dir;
-    await ref.read(trackedReposProvider.notifier).add(top);
+    final guard = await ref.read(trackedReposProvider.notifier).add(top);
+    if (!guard.ok && guard.message != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(guard.message!), duration: const Duration(seconds: 8)),
+      );
+    }
   }
 }
 
