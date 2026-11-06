@@ -39,14 +39,19 @@ typical setup:
   1. gita_scan to see the accounts the user's projects commit with, and
      confirm with the user which ones to set up.
   2. gita_setup (with "only" for the accounts they chose), or
-     gita_profile_add for an account no project uses yet.
-  3. gita_sign_in for each profile that isn't signed in: it gives a code;
-     tell the user to enter it on the page it names. It finishes by
-     itself; gita_profiles shows signedIn=true when it has.
-  4. gita_company_import if their company gave them a Gita setup file.
+     gita_profile_add for an account no project uses yet. Then
+     gita_profile_edit to give each profile the name the user knows it
+     by (e.g. "Work") and its GitHub account name, if they told you.
+  3. gita_company_import if their company gave them a Gita setup file.
+  4. gita_sign_in for each profile that isn't signed in, one at a time:
+     it gives a code; tell the user to sign in to GitHub as that account
+     and enter the code on the page it names. It finishes by itself;
+     gita_profiles shows signedIn=true when it has.
   5. gita_doctor with fix=true, then tell the user about anything left.
+     Until a profile is signed in, the doctor warns that it has no
+     sign-in; that's expected, and gita_sign_in is the fix.
 Use gita_rule_add to make a folder, or a GitHub organization's projects,
-use a profile.
+use a profile, and gita_guard to add or check a project's safety check.
 
 Never change git's user.name/user.email or credentials yourself to work
 around a problem Gita reports, and never ask the user for a password or
@@ -109,6 +114,8 @@ token: sign-ins go through gita_sign_in.''';
         },
       },
       required: ['address'],
+      readOnly: false,
+      openWorld: true,
     ),
     _tool(
       'gita_scan',
@@ -118,7 +125,10 @@ token: sign-ins go through gita_sign_in.''';
         'folders': {
           'type': 'array',
           'items': {'type': 'string'},
-          'description': 'Folders to look in (optional; default: the usual project folders).',
+          'description': 'Folders to look in (optional; default: the usual project '
+              'folders in the home folder, such as Projects, code, repos or '
+              'Documents/GitHub; '
+              'the result lists the ones it searched).',
         },
       },
     ),
@@ -127,7 +137,10 @@ token: sign-ins go through gita_sign_in.''';
       'Set Gita up from the projects on this computer: scans like gita_scan, '
           'then adds a profile per account found, folder rules, SSH keys and '
           'the safety check in each project. Profiles that already exist are '
-          'reused. Afterwards, sign in each profile listed in needSignIn.',
+          'reused. A new profile is named after its email (e.g. "Acme" for '
+          '@acme.com); rename it or add its GitHub account with '
+          'gita_profile_edit. needSignIn lists the ids of profiles still to '
+          'sign in (profiles gives their names); sign each in with gita_sign_in.',
       {
         'folders': {
           'type': 'array',

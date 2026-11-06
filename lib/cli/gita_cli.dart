@@ -1285,8 +1285,8 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
           err
             ..writeln('Gita: there is no GitHub sign-in saved for $name, so '
                 "this push can't sign in.")
-            ..writeln('Gita: open the Gita app, go to Profiles, edit $name, '
-                'paste an access token and press Save. Then push again.');
+            ..writeln('Gita: open the Gita app, go to Profiles, edit $name '
+                'and press "Sign in with GitHub". Then push again.');
           // Stop git from trying other ways to sign in (such as a login
           // remembered for a different account) or prompting for a password.
           out.writeln('quit=1');

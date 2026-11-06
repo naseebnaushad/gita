@@ -125,9 +125,14 @@ void main() {
     for (final name in ['gita_check', 'gita_which', 'gita_profiles', 'gita_scan', 'gita_rules']) {
       expect(readOnly(name), isTrue, reason: name);
     }
-    for (final name in ['gita_setup', 'gita_profile_add', 'gita_rule_add', 'gita_rule_remove', 'gita_sign_in', 'gita_doctor']) {
+    // Every other tool changes something, so none of them may claim to be
+    // read-only (a client may run read-only tools without asking).
+    for (final t in tools) {
+      final name = t['name'] as String;
+      if (['gita_check', 'gita_which', 'gita_profiles', 'gita_scan', 'gita_rules'].contains(name)) continue;
       expect(readOnly(name), isFalse, reason: name);
     }
+    expect(tools.firstWhere((t) => t['name'] == 'gita_clone')['annotations']['openWorldHint'], isTrue);
     expect(tools.firstWhere((t) => t['name'] == 'gita_rule_remove')['annotations']['destructiveHint'], isTrue);
     expect(init['instructions'], contains('gita_setup'));
     expect(tools.firstWhere((t) => t['name'] == 'gita_clone')['inputSchema']['required'], ['address']);
