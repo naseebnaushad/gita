@@ -7,6 +7,8 @@ import 'models/ssh_key.dart';
 import 'models/tracked_repo.dart';
 import 'services/git_service.dart';
 import 'services/gitconfig_service.dart';
+import 'services/github_device_flow.dart';
+import 'services/github_oauth_config.dart';
 import 'services/gpg_service.dart';
 import 'services/identity_doctor_service.dart';
 import 'services/mismatch_detector.dart';
@@ -45,6 +47,13 @@ final trackedRepoRepositoryProvider =
     Provider((ref) => TrackedRepoRepository(paths: ref.watch(platformPathsProvider)));
 
 final secureTokenServiceProvider = Provider((ref) => SecureTokenService());
+
+/// GitHub device-flow sign-in, or null when this copy of Gita has no OAuth
+/// client ID configured (people paste a token instead).
+final gitHubDeviceFlowProvider = Provider<GitHubDeviceFlow?>((ref) {
+  final clientId = resolveGitHubClientId();
+  return clientId == null ? null : GitHubDeviceFlow(clientId: clientId);
+});
 
 final gpgServiceProvider = Provider((ref) => const GpgService());
 

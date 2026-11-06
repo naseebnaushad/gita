@@ -5,6 +5,10 @@ class Profile {
   final String gitEmail;
   final String? sshKeyId;
   final String? gpgKeyId;
+
+  /// The GitHub account this profile's token belongs to, recorded when the
+  /// person signs in with GitHub. Null for pasted tokens or no token.
+  final String? githubLogin;
   final bool signCommitsByDefault;
   final int colorArgb;
   final DateTime createdAt;
@@ -16,6 +20,7 @@ class Profile {
     required this.gitEmail,
     this.sshKeyId,
     this.gpgKeyId,
+    this.githubLogin,
     this.signCommitsByDefault = false,
     required this.colorArgb,
     required this.createdAt,
@@ -27,6 +32,7 @@ class Profile {
     String? gitEmail,
     String? sshKeyId,
     String? gpgKeyId,
+    String? githubLogin,
     bool? signCommitsByDefault,
     int? colorArgb,
   }) {
@@ -37,6 +43,7 @@ class Profile {
       gitEmail: gitEmail ?? this.gitEmail,
       sshKeyId: sshKeyId ?? this.sshKeyId,
       gpgKeyId: gpgKeyId ?? this.gpgKeyId,
+      githubLogin: githubLogin ?? this.githubLogin,
       signCommitsByDefault: signCommitsByDefault ?? this.signCommitsByDefault,
       colorArgb: colorArgb ?? this.colorArgb,
       createdAt: createdAt,
@@ -51,6 +58,7 @@ class Profile {
       gitEmail: json['gitEmail'] as String,
       sshKeyId: json['sshKeyId'] as String?,
       gpgKeyId: json['gpgKeyId'] as String?,
+      githubLogin: json['githubLogin'] as String?,
       signCommitsByDefault: json['signCommitsByDefault'] as bool? ?? false,
       colorArgb: json['colorArgb'] as int,
       createdAt: DateTime.parse(json['createdAt'] as String),
@@ -64,6 +72,7 @@ class Profile {
         'gitEmail': gitEmail,
         'sshKeyId': sshKeyId,
         'gpgKeyId': gpgKeyId,
+        if (githubLogin != null) 'githubLogin': githubLogin,
         'signCommitsByDefault': signCommitsByDefault,
         'colorArgb': colorArgb,
         'createdAt': createdAt.toIso8601String(),

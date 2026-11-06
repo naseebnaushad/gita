@@ -5,9 +5,11 @@ import 'package:uuid/uuid.dart';
 import '../../app/theme.dart';
 import '../../core/models/profile.dart';
 import '../../core/providers.dart';
+import '../../core/services/github_device_flow.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/initials_avatar.dart';
 import '../../widgets/screen_header.dart';
+import 'github_sign_in_dialog.dart';
 
 class ProfilesScreen extends ConsumerWidget {
   const ProfilesScreen({super.key});
@@ -141,7 +143,9 @@ class _ProfileCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                         Text(
-                          profile.gitName,
+                          profile.githubLogin == null
+                              ? profile.gitName
+                              : '${profile.gitName} · @${profile.githubLogin}',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                 color: scheme.onSurfaceVariant,
                               ),
@@ -206,6 +210,10 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
   late int _colorArgb;
   bool _hadStoredToken = false;
   bool _obscureToken = true;
+  bool _showTokenField = false;
+
+  /// The GitHub account the token belongs to, when it came from signing in.
+  String? _githubLogin;
 
   @override
   void initState() {
@@ -217,12 +225,15 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     _tokenController = TextEditingController();
     _signByDefault = e?.signCommitsByDefault ?? false;
     _colorArgb = e?.colorArgb ?? profileColorPalette[0];
+    _githubLogin = e?.githubLogin;
     if (e != null) {
       ref.read(secureTokenServiceProvider).readToken(e.id).then((token) {
         if (!mounted || token == null) return;
         setState(() {
           _tokenController.text = token;
           _hadStoredToken = true;
+          // A token without a recorded login was pasted: keep showing it.
+          _showTokenField = _githubLogin == null;
         });
       });
     }
@@ -283,18 +294,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
                 },
               ),
               const SizedBox(height: 14),
-              TextFormField(
-                controller: _tokenController,
-                obscureText: _obscureToken,
-                decoration: InputDecoration(
-                  labelText: 'Access token (optional, for HTTPS remotes)',
-                  helperText: 'Stored in the OS keychain, never in plain files.',
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscureToken ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                    onPressed: () => setState(() => _obscureToken = !_obscureToken),
-                  ),
-                ),
-              ),
+              _gitHubSection(context),
               const SizedBox(height: 8),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -347,6 +347,108 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     );
   }
 
+  Widget _gitHubSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final flow = ref.watch(gitHubDeviceFlowProvider);
+    final signedIn = _githubLogin != null && _tokenController.text.trim().isNotEmpty;
+
+    final tokenField = TextFormField(
+      controller: _tokenController,
+      obscureText: _obscureToken,
+      onChanged: (_) => setState(() => _githubLogin = null),
+      decoration: InputDecoration(
+        labelText: 'GitHub access token (for HTTPS pushes)',
+        helperText: 'Stored in the OS keychain, never in plain files.',
+        suffixIcon: IconButton(
+          icon: Icon(_obscureToken ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+          onPressed: () => setState(() => _obscureToken = !_obscureToken),
+        ),
+      ),
+    );
+
+    if (flow == null) return tokenField;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('GitHub account for pushes',
+            style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 8),
+        if (signedIn)
+          Row(
+            children: [
+              Icon(Icons.check_circle, size: 18, color: scheme.secondary),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Signed in as @$_githubLogin')),
+              TextButton(
+                onPressed: () => _signIn(flow),
+                child: const Text('Change'),
+              ),
+              TextButton(
+                onPressed: () => setState(() {
+                  _tokenController.clear();
+                  _githubLogin = null;
+                }),
+                child: const Text('Sign out'),
+              ),
+            ],
+          )
+        else
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: () => _signIn(flow),
+              icon: const Icon(Icons.login, size: 18),
+              label: const Text('Sign in with GitHub'),
+            ),
+          ),
+        if (!signedIn) ...[
+          const SizedBox(height: 4),
+          if (_showTokenField)
+            tokenField
+          else
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () => setState(() => _showTokenField = true),
+                child: const Text('Paste a token instead'),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _signIn(GitHubDeviceFlow flow) async {
+    final result = await showDialog<GitHubSignInResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => GitHubSignInDialog(
+        flow: flow,
+        expectedLogin: _githubLogin ?? widget.existing?.githubLogin,
+      ),
+    );
+    if (result == null || !mounted) return;
+    final account = result.account;
+    setState(() {
+      _tokenController.text = result.token;
+      _githubLogin = account.login;
+      _showTokenField = false;
+      // Fill in the commit identity for new profiles, never overwrite it.
+      final name = account.name?.trim();
+      if (_nameController.text.trim().isEmpty) {
+        _nameController.text = (name == null || name.isEmpty) ? account.login : name;
+      }
+      if (_emailController.text.trim().isEmpty && account.email != null) {
+        _emailController.text = account.email!;
+      }
+      if (_labelController.text.trim().isEmpty) {
+        _labelController.text = account.login;
+      }
+    });
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final existing = widget.existing;
@@ -357,6 +459,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
       gitEmail: _emailController.text.trim(),
       sshKeyId: existing?.sshKeyId,
       gpgKeyId: existing?.gpgKeyId,
+      githubLogin: _tokenController.text.trim().isEmpty ? null : _githubLogin,
       signCommitsByDefault: _signByDefault,
       colorArgb: _colorArgb,
       createdAt: existing?.createdAt ?? DateTime.now(),
