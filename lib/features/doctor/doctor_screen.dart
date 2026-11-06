@@ -4,8 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme.dart';
 import '../../core/models/doctor_issue.dart';
 import '../../core/models/mismatch_report.dart' show Severity;
+import '../../core/models/profile.dart';
 import '../../core/providers.dart';
+import '../../core/services/doctor_fixes.dart';
 import '../../widgets/empty_state.dart';
+import '../profiles/github_sign_in_dialog.dart';
+import '../profiles/profiles_screen.dart' show showProfileEditor;
 import '../../widgets/screen_header.dart';
 import '../../widgets/status_chip.dart';
 
@@ -96,15 +100,83 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _IssueTile extends StatelessWidget {
+class _IssueTile extends ConsumerStatefulWidget {
   const _IssueTile({required this.issue});
 
   final DoctorIssue issue;
 
   @override
+  ConsumerState<_IssueTile> createState() => _IssueTileState();
+}
+
+class _IssueTileState extends ConsumerState<_IssueTile> {
+  DoctorFix? _running;
+
+  Future<void> _apply(DoctorFix fix) async {
+    final issue = widget.issue;
+    final actions = ref.read(doctorActionsProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _running = fix);
+    String? message;
+    try {
+      message = switch (fix) {
+        DoctorFix.turnOffSigning => await actions.turnOffSigning(issue.profileId!),
+        DoctorFix.unlinkSshKey => await actions.unlinkSshKey(issue.profileId!),
+        DoctorFix.deleteRule => await actions.deleteRule(issue.ruleId!),
+        DoctorFix.installCli => await actions.installCli(),
+        DoctorFix.signIn => await _signIn(issue.profileId!),
+        DoctorFix.setUpSshKey => await _openProfile(issue.profileId!),
+      };
+    } catch (e) {
+      message = "That didn't work: ${e is StateError ? e.message : e}";
+    } finally {
+      if (mounted) setState(() => _running = null);
+    }
+    if (message != null) {
+      messenger.showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 6)));
+    }
+  }
+
+  /// Runs GitHub sign-in for the profile; without a built-in sign-in app,
+  /// opens the profile so a token can be pasted.
+  Future<String?> _signIn(String profileId) async {
+    final flow = ref.read(gitHubDeviceFlowProvider);
+    if (flow == null) return _openProfile(profileId);
+    final profile = await _findProfile(profileId);
+    if (!mounted) return null;
+    final result = await showDialog<GitHubSignInResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => GitHubSignInDialog(flow: flow, expectedLogin: profile.githubLogin),
+    );
+    if (result == null) return null;
+    return ref
+        .read(doctorActionsProvider)
+        .saveSignIn(profileId, token: result.token, login: result.account.login);
+  }
+
+  Future<String?> _openProfile(String profileId) async {
+    final profile = await _findProfile(profileId);
+    if (!mounted) return null;
+    await showProfileEditor(context, profile);
+    ref.invalidate(doctorIssuesProvider);
+    return null;
+  }
+
+  Future<Profile> _findProfile(String id) async {
+    final profiles = await ref.read(profilesProvider.future);
+    return profiles.firstWhere(
+      (p) => p.id == id,
+      orElse: () => throw StateError('That profile no longer exists.'),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final issue = widget.issue;
     final blocking = issue.severity == Severity.blocking;
     final color = blocking ? GitaColors.red : GitaColors.amber;
+    final fixes = fixesFor(issue);
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Padding(
@@ -129,9 +201,42 @@ class _IssueTile extends StatelessWidget {
             Expanded(
               child: Text(issue.message, style: Theme.of(context).textTheme.bodyMedium),
             ),
+            for (final (i, fix) in fixes.indexed) ...[
+              const SizedBox(width: 10),
+              _FixButton(
+                label: fix.label,
+                primary: i == 0,
+                running: _running == fix,
+                onPressed: _running == null ? () => _apply(fix) : null,
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+}
+
+class _FixButton extends StatelessWidget {
+  const _FixButton({
+    required this.label,
+    required this.primary,
+    required this.running,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool primary;
+  final bool running;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final child = running
+        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+        : Text(label);
+    return primary
+        ? FilledButton.tonal(onPressed: onPressed, child: child)
+        : TextButton(onPressed: onPressed, child: child);
   }
 }

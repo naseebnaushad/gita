@@ -6,6 +6,7 @@ import 'models/repo_rule.dart';
 import 'models/ssh_key.dart';
 import 'models/tracked_repo.dart';
 import 'services/cli_installer.dart';
+import 'services/doctor_fixes.dart';
 import 'services/git_config_sync.dart';
 import 'services/git_service.dart';
 import 'services/gitconfig_service.dart';
@@ -77,7 +78,9 @@ final cliInstallerProvider =
 /// and, when that changed anything, rewrites the profiles' git settings so
 /// profiles with a saved GitHub sign-in start using it. Read once at
 /// startup.
-final cliInstallProvider = FutureProvider<CliInstallResult>((ref) async {
+final cliInstallProvider = FutureProvider<CliInstallResult>(_installCli);
+
+Future<CliInstallResult> _installCli(Ref ref) async {
   final result = await ref.read(cliInstallerProvider).install();
   if (result.changed) {
     final profiles = await ref.read(profilesProvider.future);
@@ -87,7 +90,7 @@ final cliInstallProvider = FutureProvider<CliInstallResult>((ref) async {
     ref.invalidate(doctorIssuesProvider);
   }
   return result;
-});
+}
 
 final gpgServiceProvider = Provider((ref) => const GpgService());
 
@@ -211,7 +214,7 @@ class TrackedReposNotifier extends AsyncNotifier<List<TrackedRepo>> {
   }
 
   /// Brings safety checks written by an older Gita up to date. Projects
-  /// without one are left for the user (Doctor offers to add it).
+  /// without one are left for the user (the Dashboard offers to add it).
   Future<int> updateOutdatedGuards() async {
     final hooks = ref.read(hookServiceProvider);
     var updated = 0;
@@ -235,3 +238,110 @@ class TrackedReposNotifier extends AsyncNotifier<List<TrackedRepo>> {
 final trackedReposProvider = AsyncNotifierProvider<TrackedReposNotifier, List<TrackedRepo>>(
   TrackedReposNotifier.new,
 );
+
+final repoFixerProvider = Provider((ref) => RepoFixer(git: ref.watch(gitServiceProvider)));
+
+final doctorActionsProvider = Provider((ref) => DoctorActions(ref));
+
+/// The one-click repairs Doctor and the Dashboard offer. Each returns a
+/// short, plain sentence saying what changed, for a snackbar.
+class DoctorActions {
+  DoctorActions(this._ref);
+
+  final Ref _ref;
+
+  Future<Profile> _profile(String id) async {
+    final profiles = await _ref.read(profilesProvider.future);
+    return profiles.firstWhere(
+      (p) => p.id == id,
+      orElse: () => throw StateError('That profile no longer exists.'),
+    );
+  }
+
+  Future<String> _saveProfile(Profile profile, String message) async {
+    await _ref.read(profilesProvider.notifier).upsert(profile);
+    _ref.invalidate(doctorIssuesProvider);
+    return message;
+  }
+
+  Future<String> turnOffSigning(String profileId) async {
+    final profile = await _profile(profileId);
+    return _saveProfile(
+      profile.copyWith(signCommitsByDefault: false, clearGpgKeyId: true),
+      'Commit signing is off for "${profile.label}", so its commits work again.',
+    );
+  }
+
+  Future<String> unlinkSshKey(String profileId) async {
+    final profile = await _profile(profileId);
+    return _saveProfile(
+      profile.copyWith(clearSshKeyId: true),
+      '"${profile.label}" no longer uses that SSH key. Its HTTPS pushes use '
+      'its GitHub sign-in; set up a new key under Profiles to push over SSH.',
+    );
+  }
+
+  Future<String> deleteRule(String ruleId) async {
+    await _ref.read(repoRulesProvider.notifier).delete(ruleId);
+    _ref.invalidate(doctorIssuesProvider);
+    return 'The rule is deleted.';
+  }
+
+  /// Saves a finished GitHub sign-in for [profileId] and turns on HTTPS
+  /// pushes for it.
+  Future<String> saveSignIn(String profileId, {required String token, required String login}) async {
+    final profile = await _profile(profileId);
+    // The token first: saving the profile rewrites its git settings, which
+    // turn the HTTPS sign-in on only when a token is stored.
+    await _ref.read(secureTokenServiceProvider).saveToken(profileId, token);
+    return _saveProfile(
+      profile.copyWith(githubLogin: login),
+      '"${profile.label}" is signed in as @$login. HTTPS pushes from its '
+      'folders now use this account.',
+    );
+  }
+
+  Future<String> installCli() async {
+    final result = await _installCli(_ref);
+    _ref.invalidate(doctorIssuesProvider);
+    return switch (result.status) {
+      CliInstallStatus.installed ||
+      CliInstallStatus.updated ||
+      CliInstallStatus.upToDate =>
+        'The gita command is installed. Saved GitHub sign-ins now work for pushes.',
+      CliInstallStatus.notBundled =>
+        "This copy of Gita doesn't include the gita command. Reinstall Gita "
+            'from the latest release.',
+      CliInstallStatus.failed =>
+        "Couldn't install the gita command: ${result.message ?? 'unknown error'}. "
+            'Close other Gita windows and try again.',
+    };
+  }
+
+  /// Applies [fix] to the project at [repoPath], then refreshes the
+  /// Dashboard so its rows show the new state.
+  Future<String> applyRepoFix(String repoPath, RepoFix fix) async {
+    final message = await _applyRepoFix(repoPath, fix);
+    await _ref.read(trackedReposProvider.notifier).refresh();
+    return message;
+  }
+
+  Future<String> _applyRepoFix(String repoPath, RepoFix fix) async {
+    switch (fix) {
+      case RepoFix.installGuard:
+        final guard = await _ref.read(trackedReposProvider.notifier).add(repoPath);
+        return guard.ok
+            ? 'The safety check is in place. Commits and pushes with the wrong '
+                'account will be stopped.'
+            : guard.message ?? "Couldn't add the safety check.";
+      case RepoFix.clearLocalIdentity:
+        await _ref.read(repoFixerProvider).clearLocalIdentity(repoPath);
+        return "This project now commits with its profile's name and email.";
+      case RepoFix.reapplySettings:
+        // Profiles must be loaded, or the rewrite would see none.
+        await _ref.read(profilesProvider.future);
+        await _ref.read(profilesProvider.notifier).resyncGitConfig();
+        return "Gita's git settings are written again.";
+    }
+  }
+}

@@ -30,13 +30,16 @@ push where the effective identity doesn't match what's expected for that repo.
   block into `~/.gitconfig` so Git resolves the right identity per repo
   automatically.
 - **Dashboard** — lists tracked repos with their assigned profile, effective
-  email, remote, and a mismatch badge.
+  email, remote, and a mismatch badge. When Gita can fix a problem itself,
+  a wrench button sits next to the badge: it adds a missing safety check,
+  removes an email a project set for itself (so the profile's applies), or
+  re-applies Gita's git settings.
 - **Doctor** — scans profiles/rules/keys for configuration drift (e.g. a
   profile with commit signing enabled but no matching GPG key on this
-  machine) before it turns into a failed commit or push.
-
-Planned: a pre-push hook that blocks mismatched pushes outright, and a
-credential-helper inspector.
+  machine) before it turns into a failed commit or push. Most problems come
+  with a one-click fix: turn off signing, stop using a missing SSH key or
+  set up a new one, delete a rule whose profile is gone, sign in with
+  GitHub, or install the `gita` command.
 
 ## Getting started
 
