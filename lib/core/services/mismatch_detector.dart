@@ -34,7 +34,7 @@ class MismatchDetector {
     required Map<String, SshKey> sshKeysById,
   }) async {
     // Step 3: which rule governs this path (longest-prefix match).
-    final rule = RepoRule.bestMatchFor(repoPath, rules);
+    final rule = await gitService.ruleFor(repoPath, rules);
     if (rule == null) {
       // Step 7: no rule matched — warning, not blocking; likely a new repo.
       return MismatchReport(

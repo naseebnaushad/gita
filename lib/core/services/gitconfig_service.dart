@@ -100,25 +100,33 @@ class GitConfigService {
   /// of rules and profiles, and splices it into `~/.gitconfig` between the
   /// markers (appending markers if this is the first sync).
   ///
-  /// Rules are emitted most-general-path first, most-specific-path last:
-  /// for a scalar key like `user.email`, git applies matching `includeIf`
+  /// Rules are emitted most-general first, most-specific last: for a
+  /// scalar key like `user.email`, git applies matching `includeIf`
   /// blocks in file order and the last match wins, so the most-specific
-  /// rule must sort last to take precedence over a broader parent-folder
-  /// rule.
+  /// rule must sort last to take precedence. Account rules become
+  /// `hasconfig:remote.*.url:` includes that match the project's remote.
   Future<void> syncManagedIncludeIfBlock({
     required List<RepoRule> rules,
     required Map<String, Profile> profilesById,
   }) async {
-    final sorted = [...rules]
-      ..sort((a, b) => paths
-          .toGitConfigPath(a.pathPattern)
-          .length
-          .compareTo(paths.toGitConfigPath(b.pathPattern).length));
+    // Git applies every matching include in order and the last value
+    // wins, so: folder rules (shortest first), then account rules, then
+    // rules for single projects. RepoRule.bestMatchFor agrees.
+    final sorted = RepoRule.inEmitOrder(rules);
 
     final block = StringBuffer()..writeln(_startMarker);
     for (final rule in sorted) {
       final profile = profilesById[rule.profileId];
       if (profile == null) continue;
+      final includePath = paths.toGitConfigPath(_profileConfigPath(profile.id));
+      if (rule.isAccountRule) {
+        for (final pattern in accountRemotePatterns(rule)) {
+          block
+            ..writeln('[includeIf "hasconfig:remote.*.url:$pattern"]')
+            ..writeln('    path = $includePath');
+        }
+        continue;
+      }
       // `gitdir:` matching is forward-slash-only regardless of OS — a
       // backslash is an escape character in the fnmatch-style pattern, not
       // a separator, so a raw Windows path here would silently never
@@ -128,7 +136,6 @@ class GitConfigService {
       final gitDir = normalizedPattern.endsWith('/')
           ? normalizedPattern
           : '$normalizedPattern/';
-      final includePath = paths.toGitConfigPath(_profileConfigPath(profile.id));
       block
         ..writeln('[includeIf "gitdir/i:$gitDir"]')
         ..writeln('    path = $includePath');
@@ -137,6 +144,30 @@ class GitConfigService {
 
     await _spliceManagedBlock(block.toString().trimRight());
   }
+
+  /// The remote address shapes an account rule covers, as git
+  /// `hasconfig:remote.*.url:` globs: HTTPS (with or without a user name)
+  /// and both SSH forms (with or without a port). Git compares
+  /// case-sensitively but GitHub doesn't care, so every letter is written
+  /// as `[aA]`: `github.com/ACME/api` and `github.com/acme/api` both match.
+  static List<String> accountRemotePatterns(RepoRule rule) {
+    final host = anyCase(rule.host);
+    final o = anyCase(rule.githubOwner!);
+    return [
+      'https://$host/$o/**',
+      'https://*@$host/$o/**',
+      '*@$host:$o/**',
+      'ssh://*@$host/$o/**',
+      'ssh://*@$host:*/$o/**',
+    ];
+  }
+
+  /// A glob matching [text] in any letter case: `Ab-1` → `[aA][bB]-1`.
+  static String anyCase(String text) => text.split('').map((c) {
+    final lower = c.toLowerCase();
+    final upper = c.toUpperCase();
+    return lower == upper ? c : '[$lower$upper]';
+  }).join();
 
   Future<void> _spliceManagedBlock(String newBlock) async {
     final file = File(paths.gitConfigPath);

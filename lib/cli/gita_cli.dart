@@ -9,6 +9,7 @@ import '../core/models/mismatch_report.dart';
 import '../core/models/profile.dart';
 import '../core/models/repo_rule.dart';
 import '../core/services/clone_service.dart';
+import '../core/services/company_setup.dart';
 import '../core/services/git_config_sync.dart';
 import '../core/services/git_service.dart';
 import '../core/services/github_device_flow.dart';
@@ -107,6 +108,11 @@ class GitaCli {
           ..addFlag('no-track', negatable: false, help: "Don't add the safety check."),
       )
       ..addCommand(
+        'company',
+        command()
+          ..addOption('profile', help: 'Name or id of the work profile.'),
+      )
+      ..addCommand(
         'sign-in',
         command()
           ..addOption('profile', help: 'Name or id of the profile to sign in.')
@@ -182,6 +188,8 @@ class GitaCli {
         return _clone(command, json: json);
       case 'sign-in':
         return _signIn(command, json: json);
+      case 'company':
+        return _company(command, json: json);
     }
     return ExitCodes.usage;
   }
@@ -220,6 +228,12 @@ Commands:
                    GitHub account owns the project, or whose folder it
                    goes in. Without a folder, it goes in the profile's
                    folder.
+  company import <file> [--profile <name or id>]
+                   Read your company's setup file and make every project
+                   from its GitHub organizations use your work profile,
+                   wherever it is on this computer. Without --profile,
+                   Gita picks the profile with a company email.
+  company list     Show the company setups on this computer.
   sign-in --profile <name or id>
                    Sign a profile in to GitHub (shows a code to enter on
                    github.com), so HTTPS pushes use that account.
@@ -256,7 +270,14 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
         'sshKey': p.sshKeyId != null,
         'folders': [
           for (final r in rules)
-            if (r.profileId == p.id) r.pathPattern,
+            if (r.profileId == p.id &&
+                !r.isAccountRule &&
+                r.pathPattern.isNotEmpty)
+              r.pathPattern,
+        ],
+        'accounts': [
+          for (final r in rules)
+            if (r.profileId == p.id && r.isAccountRule) r.describe,
         ],
       });
     }
@@ -274,14 +295,20 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
           ? 'saved'
           : 'none (run "gita sign-in --profile ${r['id']}")';
       final folders = r['folders']! as List;
+      final accounts = r['accounts']! as List;
       out
         ..writeln('${r['label']}  (id: ${r['id']})$login')
         ..writeln('  Commits as:      ${r['name']} <${r['email']}>')
         ..writeln('  GitHub sign-in:  $signedIn')
         ..writeln('  SSH key:         ${r['sshKey'] == true ? 'yes' : 'no'}')
-        ..writeln(folders.isEmpty
-            ? '  Folders:         none yet (add a rule in Gita)'
-            : '  Folders:         ${folders.join(', ')}')
+        ..writeln(
+          folders.isEmpty
+              ? '  Folders:         none yet (add a rule in Gita)'
+              : '  Folders:         ${folders.join(', ')}',
+        )
+        ..write(
+          accounts.isEmpty ? '' : '  Projects from:   ${accounts.join(', ')}\n',
+        )
         ..writeln();
     }
     return ExitCodes.ok;
@@ -358,6 +385,137 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
   /// open github.com/login/device, wait) or, with --with-token, a token
   /// read from stdin. Saves the token, records the account on the profile
   /// and turns on HTTPS pushes for it.
+  // -------------------------------------------------------------- company
+
+  Future<int> _company(ArgResults command, {required bool json}) async {
+    final rest = command.rest;
+    final service = CompanyService(paths: paths);
+    if (rest.length == 1 && rest.first == 'list') {
+      final setups = await service.load();
+      if (json) {
+        out.writeln(
+          _encode({
+            'ok': true,
+            'companies': [for (final s in setups) s.toJson()],
+          }),
+        );
+        return ExitCodes.ok;
+      }
+      if (setups.isEmpty) {
+        out.writeln(
+          'No company setup yet. Import one with: gita company import <file>',
+        );
+        return ExitCodes.ok;
+      }
+      final rules = await RepoRuleRepository(paths: paths).getAll();
+      final profiles = {
+        for (final x in await ProfileRepository(paths: paths).getAll()) x.id: x,
+      };
+      for (final s in setups) {
+        out.writeln(
+          '${s.name}  (emails: ${s.emailDomains.isEmpty ? 'any' : s.emailDomains.map((d) => '@$d').join(', ')})',
+        );
+        for (final owner in s.owners) {
+          final rule = s.ruleFor(owner, rules);
+          final profile = profiles[rule?.profileId];
+          out.writeln(
+            '  ${s.host}/$owner  ->  ${profile == null ? 'no profile set' : '${profile.label} <${profile.gitEmail}>'}',
+          );
+        }
+      }
+      return ExitCodes.ok;
+    }
+    if (rest.length != 2 || rest.first != 'import') {
+      _fail(
+        'Usage: gita company import <file> [--profile <name>]  or  gita company list',
+        json: json,
+      );
+      return ExitCodes.usage;
+    }
+
+    final file = File(p.absolute(cwd, rest[1]));
+    if (!file.existsSync()) {
+      _fail(
+        "There's no file at ${file.path}. Ask whoever sent it for the company setup file.",
+        json: json,
+      );
+      return ExitCodes.usage;
+    }
+    final CompanySetup setup;
+    try {
+      setup = CompanySetup.parse(await file.readAsString());
+    } on FormatException catch (e) {
+      _fail(e.message, json: json);
+      return ExitCodes.usage;
+    }
+
+    final profiles = await ProfileRepository(paths: paths).getAll();
+    if (profiles.isEmpty) {
+      _fail(
+        'There are no profiles yet. Open Gita and add your work profile first (or press "Scan this computer").',
+        json: json,
+      );
+      return ExitCodes.usage;
+    }
+    final wanted = command['profile'] as String?;
+    Profile? profile;
+    if (wanted != null) {
+      profile = _findProfile(profiles, wanted);
+      if (profile == null) {
+        final names = profiles.map((x) => '"${x.label}" (${x.id})').join(', ');
+        _fail(
+          'There is no profile called "$wanted". Profiles: $names',
+          json: json,
+        );
+        return ExitCodes.usage;
+      }
+    } else {
+      profile = CompanyService.pickProfile(setup, profiles);
+      if (profile == null) {
+        final company = setup.companyProfiles(profiles);
+        final names = (company.isEmpty ? profiles : company)
+            .map((x) => x.label)
+            .join(', ');
+        final domains = setup.emailDomains.map((d) => '@$d').join(' or ');
+        _fail(
+          company.isEmpty
+              ? 'No profile commits with a ${setup.name} email${domains.isEmpty ? '' : ' ($domains)'}. '
+                    'Say which profile is your work one: gita company import ${rest[1]} --profile <name>  (profiles: $names)'
+              : 'More than one profile has a ${setup.name} email. Say which: '
+                    'gita company import ${rest[1]} --profile <name>  (profiles: $names)',
+          json: json,
+        );
+        return ExitCodes.usage;
+      }
+    }
+
+    final result = await service.import(
+      setup,
+      profile,
+      hasToken: tokenStore.hasToken,
+    );
+    var message = result.message(setup);
+    if (setup.emailDomains.isNotEmpty &&
+        !setup.isCompanyEmail(profile.gitEmail)) {
+      message +=
+          ' Note: "${profile.label}" commits as ${profile.gitEmail}, which is not a '
+          '${setup.name} email, so "gita doctor" will warn about it.';
+    }
+    if (json) {
+      out.writeln(
+        _encode({
+          'ok': true,
+          'company': setup.name,
+          ...result.toJson(),
+          'message': message,
+        }),
+      );
+    } else {
+      out.writeln(message);
+    }
+    return ExitCodes.ok;
+  }
+
   Future<int> _clone(ArgResults command, {required bool json}) async {
     if (command.rest.isEmpty || command.rest.length > 2) {
       _fail(
@@ -397,7 +555,7 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
         return ExitCodes.usage;
       }
     } else {
-      profile = CloneService.suggestProfile(url, profiles);
+      profile = CloneService.suggestProfile(url, profiles, rules: rules);
       if (profile == null && destination != null) {
         final rule = RepoRule.bestMatchFor(destination, rules);
         profile = profiles.where((x) => x.id == rule?.profileId).firstOrNull;
@@ -946,7 +1104,7 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
 
     // Same lookup MismatchDetector uses, so `which` can show the expected
     // profile even when the repo is consistent (report == null).
-    final rule = RepoRule.bestMatchFor(repoPath, rules);
+    final rule = await gitService.ruleFor(repoPath, rules);
     return _RepoStatus(
       repoPath: repoPath,
       expectedProfile: rule == null ? null : profilesById[rule.profileId],

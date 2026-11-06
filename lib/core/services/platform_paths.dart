@@ -31,6 +31,9 @@ class PlatformPaths {
 
   String get sshKeysJsonPath => p.join(gitaDir, 'ssh_keys.json');
 
+  /// Company setups imported with "Import company setup" / `gita company`.
+  String get companyJsonPath => p.join(gitaDir, 'company.json');
+
   String get trackedReposJsonPath => p.join(gitaDir, 'tracked_repos.json');
 
   /// Flat pathPattern|expectedEmail|expectedHostAlias cache the pre-push

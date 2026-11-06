@@ -11,6 +11,7 @@ import 'models/ssh_key.dart';
 import 'models/tracked_repo.dart';
 import 'services/cli_installer.dart';
 import 'services/clone_service.dart';
+import 'services/company_setup.dart';
 import 'services/doctor_fixes.dart';
 import 'services/git_config_sync.dart';
 import 'services/git_service.dart';
@@ -287,6 +288,35 @@ class DoctorActions {
     );
   }
 
+  /// Makes projects from the issue's GitHub organization use the
+  /// company profile Doctor suggested.
+  Future<String> useCompanyProfile(DoctorIssue issue) async {
+    final profile = await _profile(issue.profileId!);
+    final owner = issue.githubOwner!;
+    final host = issue.host ?? RepoRule.defaultHost;
+    final rules = await _ref.read(repoRulesProvider.future);
+    final existing = rules
+        .where(
+          (r) =>
+              r.isAccountRule &&
+              r.host == host &&
+              r.githubOwner!.toLowerCase() == owner.toLowerCase(),
+        )
+        .firstOrNull;
+    await _ref
+        .read(repoRulesProvider.notifier)
+        .upsert(
+          RepoRule.account(
+            id: existing?.id ?? const Uuid().v4(),
+            owner: existing?.githubOwner ?? owner,
+            profileId: profile.id,
+            host: host,
+          ),
+        );
+    _ref.invalidate(doctorIssuesProvider);
+    return 'Projects from $host/$owner now use "${profile.label}" (${profile.gitEmail}).';
+  }
+
   Future<String> deleteRule(String ruleId) async {
     await _ref.read(repoRulesProvider.notifier).delete(ruleId);
     _ref.invalidate(doctorIssuesProvider);
@@ -389,6 +419,36 @@ class CloneActions {
       ..invalidate(trackedReposProvider)
       ..invalidate(doctorIssuesProvider);
     return outcome;
+  }
+}
+
+final companyServiceProvider = Provider(
+  (ref) => CompanyService(paths: ref.watch(platformPathsProvider)),
+);
+
+/// Imports a company setup file, then refreshes rules and Doctor.
+final companyActionsProvider = Provider((ref) => CompanyActions(ref));
+
+class CompanyActions {
+  CompanyActions(this._ref);
+
+  final Ref _ref;
+
+  Future<CompanyImportResult> import(
+    CompanySetup setup,
+    Profile profile,
+  ) async {
+    final result = await _ref
+        .read(companyServiceProvider)
+        .import(
+          setup,
+          profile,
+          hasToken: _ref.read(secureTokenServiceProvider).hasToken,
+        );
+    _ref
+      ..invalidate(repoRulesProvider)
+      ..invalidate(doctorIssuesProvider);
+    return result;
   }
 }
 

@@ -110,8 +110,22 @@ class CloneService {
     return _scpLike.hasMatch(u) || u.startsWith('ssh://');
   }
 
-  /// The profile whose GitHub account owns the project, if one does.
-  static Profile? suggestProfile(String url, List<Profile> profiles) {
+  /// The profile for the project at [url]: an account rule for its
+  /// GitHub organization first, else the profile whose GitHub account
+  /// owns it.
+  static Profile? suggestProfile(
+    String url,
+    List<Profile> profiles, {
+    List<RepoRule> rules = const [],
+  }) {
+    for (final rule in RepoRule.inEmitOrder(
+      rules.where((r) => r.isAccountRule).toList(),
+    ).reversed) {
+      if (rule.coversRemote(url)) {
+        final match = profiles.where((p) => p.id == rule.profileId).firstOrNull;
+        if (match != null) return match;
+      }
+    }
     final owner = ownerFromUrl(url)?.toLowerCase();
     if (owner == null) return null;
     for (final profile in profiles) {
@@ -126,7 +140,10 @@ class CloneService {
     if (profile != null) {
       final folders = [
         for (final r in rules)
-          if (r.profileId == profile.id) r.pathPattern.replaceAll('\\', '/'),
+          if (r.profileId == profile.id &&
+              !r.isAccountRule &&
+              r.pathPattern.isNotEmpty)
+            r.pathPattern.replaceAll('\\', '/'),
       ]..sort((a, b) => a.length.compareTo(b.length));
       for (final f in folders) {
         // A rule for a single project is not a folder to clone into.
@@ -203,8 +220,16 @@ class CloneService {
     final ruleRepo = RepoRuleRepository(paths: paths);
     final rules = await ruleRepo.getAll();
     var addedRule = false;
-    if (RepoRule.bestMatchFor(top, rules)?.profileId != profile.id) {
-      await ruleRepo.upsert(RepoRule(id: const Uuid().v4(), pathPattern: top, profileId: profile.id));
+    final urls = {url.trim(), ...await git.remoteUrls(top)}.toList();
+    if (RepoRule.bestMatchFor(top, rules, remoteUrls: urls)?.profileId !=
+        profile.id) {
+      await ruleRepo.upsert(
+        RepoRule(
+          id: const Uuid().v4(),
+          pathPattern: top,
+          profileId: profile.id,
+        ),
+      );
       await syncGitConfig(paths: paths, hasToken: hasToken);
       addedRule = true;
     }

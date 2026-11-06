@@ -680,7 +680,10 @@ class SetupPlan {
     final keys = <SshKey>[];
     final rules = <RepoRule>[];
     final projects = <String>{};
-    final rulePatterns = {for (final r in existingRules) _norm(r.pathPattern)};
+    final rulePatterns = {
+      for (final r in existingRules)
+        if (!r.isAccountRule && r.pathPattern.isNotEmpty) _norm(r.pathPattern),
+    };
     var colorIndex = existingProfiles.length;
 
     for (final c in choices) {

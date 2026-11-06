@@ -207,9 +207,12 @@ class _RepoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final matched = RepoRule.bestMatchFor(repo.path, rules);
-    final profile = matched != null ? profilesById[matched.profileId] : null;
-    final name = repo.path.split(RegExp(r'[\\/]')).where((s) => s.isNotEmpty).lastOrNull ?? repo.path;
+    final name =
+        repo.path
+            .split(RegExp(r'[\\/]'))
+            .where((s) => s.isNotEmpty)
+            .lastOrNull ??
+        repo.path;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -240,16 +243,38 @@ class _RepoRow extends StatelessWidget {
           ),
           Expanded(
             flex: 2,
-            child: profile == null
-                ? Text('—', style: TextStyle(color: scheme.onSurfaceVariant))
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      InitialsAvatar(label: profile.label, color: Color(profile.colorArgb), radius: 11),
-                      const SizedBox(width: 8),
-                      Flexible(child: Text(profile.label, overflow: TextOverflow.ellipsis)),
-                    ],
-                  ),
+            child: FutureBuilder<RepoRule?>(
+              future: git.ruleFor(repo.path, rules),
+              builder: (context, snapshot) {
+                final matched = snapshot.data;
+                final profile = matched != null
+                    ? profilesById[matched.profileId]
+                    : null;
+                if (profile == null) {
+                  return Text(
+                    '—',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  );
+                }
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    InitialsAvatar(
+                      label: profile.label,
+                      color: Color(profile.colorArgb),
+                      radius: 11,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        profile.label,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
           Expanded(
             flex: 3,

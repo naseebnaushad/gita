@@ -55,7 +55,7 @@ class PushGuard {
   Future<Profile?> expectedProfile(String repo, List<Profile> profiles, List<RepoRule> rules) async {
     final top = await git.topLevel(repo);
     if (top == null) return null;
-    final rule = RepoRule.bestMatchFor(resolveRepoPath(top), rules);
+    final rule = await git.ruleFor(resolveRepoPath(top), rules);
     if (rule == null) return null;
     return profiles.where((p) => p.id == rule.profileId).firstOrNull;
   }
