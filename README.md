@@ -129,8 +129,12 @@ The token asks for `repo` (push to private repos), `workflow` (push
 changes to `.github/workflows`), and `read:user` and `user:email` (to show
 the account and fill in the email).
 
-The button only appears when Gita knows a GitHub OAuth app client ID.
-Whoever manages Gita sets that up once:
+Gita signs in through its own GitHub OAuth app, "Gita"
+(client ID `Ov23licOLgsWLhLzch9w`, built in, nothing to set up). On
+GitHub's approval page people see "Gita" asking for those permissions.
+
+To use a different OAuth app instead (for example one owned by your
+organization):
 
 1. On GitHub, open **Settings → Developer settings → OAuth Apps → New
    OAuth App** (for a company, create it under the organization's
@@ -147,6 +151,9 @@ Whoever manages Gita sets that up once:
 
    or, without rebuilding, set the `GITA_GITHUB_CLIENT_ID` environment
    variable before starting Gita.
+
+Building with `--dart-define=GITA_GITHUB_CLIENT_ID=` (empty) hides the
+button, leaving only "paste a token".
 
 If the organization restricts OAuth app access, an owner approves Gita
 once under **Organization settings → Third-party access**; until then
