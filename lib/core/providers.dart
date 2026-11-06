@@ -6,6 +6,7 @@ import 'models/repo_rule.dart';
 import 'models/ssh_key.dart';
 import 'models/tracked_repo.dart';
 import 'services/cli_installer.dart';
+import 'services/git_config_sync.dart';
 import 'services/git_service.dart';
 import 'services/gitconfig_service.dart';
 import 'services/github_device_flow.dart';
@@ -130,28 +131,11 @@ class ProfilesNotifier extends AsyncNotifier<List<Profile>> {
   /// turns its HTTPS credential helper on or off.
   Future<void> resyncGitConfig() => _resyncGitConfig();
 
-  Future<void> _resyncGitConfig() async {
-    final profiles = state.value ?? [];
-    final gitConfigService = ref.read(gitConfigServiceProvider);
-    final tokens = ref.read(secureTokenServiceProvider);
-    final sshKeyService = ref.read(sshKeyServiceProvider);
-    final sshKeys = {
-      for (final k in await ref.read(sshKeyRepositoryProvider).getAll()) k.id: k,
-    };
-    for (final profile in profiles) {
-      final sshKey = sshKeys[profile.sshKeyId];
-      await gitConfigService.writeProfileConfigFile(
-        profile,
-        sshCommand: sshKey == null ? null : sshKeyService.sshCommandFor(sshKey),
-        useCredentialHelper: await tokens.hasToken(profile.id),
+  Future<void> _resyncGitConfig() => syncGitConfig(
+        paths: ref.read(platformPathsProvider),
+        hasToken: ref.read(secureTokenServiceProvider).hasToken,
+        profiles: state.value ?? const [],
       );
-    }
-    final rules = await ref.read(repoRuleRepositoryProvider).getAll();
-    await gitConfigService.syncManagedIncludeIfBlock(
-      rules: rules,
-      profilesById: {for (final p in profiles) p.id: p},
-    );
-  }
 }
 
 final profilesProvider = AsyncNotifierProvider<ProfilesNotifier, List<Profile>>(

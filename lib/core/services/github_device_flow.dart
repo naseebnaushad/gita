@@ -144,6 +144,9 @@ class GitHubDeviceFlow {
     } on Exception {
       throw const DeviceFlowException(DeviceFlowError.network);
     }
+    if (response.statusCode == 401) {
+      throw const DeviceFlowException(DeviceFlowError.badToken);
+    }
     if (response.statusCode != 200) {
       throw const DeviceFlowException(DeviceFlowError.unexpected);
     }
@@ -206,6 +209,9 @@ enum DeviceFlowError {
   deviceFlowDisabled,
   badClientId,
   network,
+
+  /// GitHub refused the token (mistyped, expired or revoked).
+  badToken,
   unexpected,
 }
 
@@ -231,6 +237,9 @@ class DeviceFlowException implements Exception {
               'Ask whoever manages Gita to check it, or paste an access token instead.',
         DeviceFlowError.network =>
           "Couldn't reach GitHub. Check the internet connection and try again.",
+        DeviceFlowError.badToken =>
+          "GitHub didn't accept this token. It may be mistyped, expired or "
+              'revoked. Sign in again, or create a new token on github.com.',
         DeviceFlowError.unexpected =>
           'GitHub sent an unexpected answer${detail == null ? '' : ' ($detail)'}. '
               'Try again in a minute.',
