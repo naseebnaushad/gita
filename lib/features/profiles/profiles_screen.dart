@@ -99,12 +99,16 @@ class ProfilesScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _openEditor(BuildContext context, WidgetRef ref, Profile? existing) async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) => _ProfileEditorDialog(existing: existing),
-    );
-  }
+  Future<void> _openEditor(BuildContext context, WidgetRef ref, Profile? existing) =>
+      showProfileEditor(context, existing);
+}
+
+/// Opens the profile editor for [existing], or for a new profile when null.
+Future<void> showProfileEditor(BuildContext context, Profile? existing) async {
+  await showDialog<void>(
+    context: context,
+    builder: (context) => _ProfileEditorDialog(existing: existing),
+  );
 }
 
 class _ProfileCard extends StatelessWidget {

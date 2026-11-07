@@ -50,6 +50,16 @@ void main() {
         [exeName], reason: 'no .new/.old files left behind');
   });
 
+  test('two installs at once take turns instead of clashing', () async {
+    writeBundled('bin/$exeName', 'v1');
+
+    final results = await Future.wait([installer().install(), installer().install()]);
+
+    expect(results.map((r) => r.status),
+        [CliInstallStatus.installed, CliInstallStatus.upToDate]);
+    expect(File(paths.cliPath).readAsStringSync(), 'v1');
+  });
+
   test('leaves a matching copy alone', () async {
     writeBundled('bin/$exeName', 'v1');
     await installer().install();

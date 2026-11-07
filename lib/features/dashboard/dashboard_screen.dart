@@ -8,6 +8,7 @@ import '../../core/models/repo_rule.dart';
 import '../../core/models/ssh_key.dart';
 import '../../core/models/tracked_repo.dart';
 import '../../core/providers.dart';
+import '../../core/services/doctor_fixes.dart';
 import '../../core/services/git_service.dart';
 import '../../core/services/mismatch_detector.dart';
 import '../../widgets/empty_state.dart';
@@ -122,7 +123,7 @@ class _RepoList extends ConsumerWidget {
                     _headerCell('PROFILE', flex: 2),
                     _headerCell('EFFECTIVE EMAIL', flex: 3),
                     _headerCell('REMOTE', flex: 3),
-                    _headerCell('STATUS', flex: 1, alignEnd: true),
+                    _headerCell('STATUS', flex: 2, alignEnd: true),
                   ],
                 ),
               ),
@@ -251,7 +252,7 @@ class _RepoRow extends StatelessWidget {
             ),
           ),
           Expanded(
-            flex: 1,
+            flex: 2,
             child: Align(
               alignment: Alignment.centerRight,
               child: _StatusIndicator(
@@ -269,7 +270,7 @@ class _RepoRow extends StatelessWidget {
   }
 }
 
-class _StatusIndicator extends StatelessWidget {
+class _StatusIndicator extends ConsumerStatefulWidget {
   const _StatusIndicator({
     required this.repoPath,
     required this.rules,
@@ -285,23 +286,49 @@ class _StatusIndicator extends StatelessWidget {
   final MismatchDetector detector;
 
   @override
+  ConsumerState<_StatusIndicator> createState() => _StatusIndicatorState();
+}
+
+class _StatusIndicatorState extends ConsumerState<_StatusIndicator> {
+  bool _fixing = false;
+
+  Future<(MismatchReport?, RepoFix?)> _check() async {
+    final report = await widget.detector.check(
+      repoPath: widget.repoPath,
+      rules: widget.rules,
+      profilesById: widget.profilesById,
+      sshKeysById: widget.sshKeysById,
+    );
+    if (report == null) return (null, null);
+    return (report, await ref.read(repoFixerProvider).fixFor(report));
+  }
+
+  Future<void> _fix(RepoFix fix) async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _fixing = true);
+    String message;
+    try {
+      message = await ref.read(doctorActionsProvider).applyRepoFix(widget.repoPath, fix);
+    } catch (e) {
+      message = "That didn't work: ${e is GitServiceException ? e.message : e}";
+    }
+    if (mounted) setState(() => _fixing = false);
+    messenger.showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 6)));
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<MismatchReport?>(
-      future: detector.check(
-        repoPath: repoPath,
-        rules: rules,
-        profilesById: profilesById,
-        sshKeysById: sshKeysById,
-      ),
+    return FutureBuilder<(MismatchReport?, RepoFix?)>(
+      future: _check(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData && snapshot.connectionState != ConnectionState.done) {
+        if (_fixing || (!snapshot.hasData && snapshot.connectionState != ConnectionState.done)) {
           return const SizedBox(
             width: 16,
             height: 16,
             child: CircularProgressIndicator(strokeWidth: 2),
           );
         }
-        final report = snapshot.data;
+        final (report, fix) = snapshot.data ?? (null, null);
         if (report == null) {
           return const StatusDot(
             icon: Icons.check_rounded,
@@ -310,10 +337,25 @@ class _StatusIndicator extends StatelessWidget {
           );
         }
         final blocking = report.severity == Severity.blocking;
-        return StatusDot(
+        final dot = StatusDot(
           icon: blocking ? Icons.close_rounded : Icons.priority_high_rounded,
           color: blocking ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
           tooltip: report.detail,
+        );
+        if (fix == null) return dot;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              key: ValueKey('fix-${widget.repoPath}'),
+              tooltip: '${fix.label}\n${report.detail}',
+              visualDensity: VisualDensity.compact,
+              iconSize: 18,
+              icon: const Icon(Icons.build_rounded),
+              onPressed: () => _fix(fix),
+            ),
+            dot,
+          ],
         );
       },
     );

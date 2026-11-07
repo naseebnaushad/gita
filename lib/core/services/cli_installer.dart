@@ -63,7 +63,17 @@ class CliInstaller {
     return p.join(exeDir, 'cli');
   }
 
-  Future<CliInstallResult> install() async {
+  /// The install that is running, so two at once (app start and a Doctor
+  /// button, say) take turns instead of copying over each other.
+  static Future<void> _running = Future.value();
+
+  Future<CliInstallResult> install() {
+    final result = _running.then((_) => _install());
+    _running = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  Future<CliInstallResult> _install() async {
     final bundledExe = File(p.join(bundledDir, 'bin', p.basename(paths.cliPath)));
     if (!bundledExe.existsSync()) {
       return const CliInstallResult(CliInstallStatus.notBundled);
