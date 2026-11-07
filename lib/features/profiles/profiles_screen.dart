@@ -12,6 +12,7 @@ import '../../widgets/empty_state.dart';
 import '../../widgets/initials_avatar.dart';
 import '../../widgets/screen_header.dart';
 import 'github_sign_in_dialog.dart';
+import '../setup/setup_wizard.dart';
 import 'ssh_setup_dialog.dart';
 
 class ProfilesScreen extends ConsumerWidget {
@@ -28,6 +29,12 @@ class ProfilesScreen extends ConsumerWidget {
           title: 'Profiles',
           subtitle: 'Git identities you can assign to folders.',
           actions: [
+            OutlinedButton.icon(
+              onPressed: () => showSetupWizard(context),
+              icon: const Icon(Icons.search, size: 18),
+              label: const Text('Scan this computer'),
+            ),
+            const SizedBox(width: 8),
             FilledButton.icon(
               onPressed: () => _openEditor(context, ref, null),
               icon: const Icon(Icons.add, size: 18),
@@ -44,10 +51,13 @@ class ProfilesScreen extends ConsumerWidget {
                 return EmptyState(
                   icon: Icons.badge_outlined,
                   title: 'No profiles yet',
-                  message: 'Create one for each Git identity (e.g. Work, '
-                      'Personal) to start assigning folders to it.',
-                  actionLabel: 'New profile',
-                  onAction: () => _openEditor(context, ref, null),
+                  message: 'Let Gita look at the projects on this computer and '
+                      'suggest one for each account (e.g. Work, Personal), or '
+                      'make one yourself.',
+                  actionLabel: 'Scan this computer',
+                  onAction: () => showSetupWizard(context),
+                  secondaryLabel: 'Make a profile myself',
+                  onSecondary: () => _openEditor(context, ref, null),
                 );
               }
               return GridView.builder(

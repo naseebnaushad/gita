@@ -15,6 +15,7 @@ import '../../widgets/empty_state.dart';
 import '../../widgets/initials_avatar.dart';
 import '../../widgets/screen_header.dart';
 import '../../widgets/status_chip.dart';
+import '../setup/setup_wizard.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -46,10 +47,12 @@ class DashboardScreen extends ConsumerWidget {
                 return EmptyState(
                   icon: Icons.folder_off_outlined,
                   title: 'No repos tracked yet',
-                  message: 'Use "Add repo" to register one, or assign a Rule '
-                      'to a folder and add repos under it.',
-                  actionLabel: 'Add repo',
-                  onAction: () => _addRepo(context, ref),
+                  message: 'Let Gita find the projects on this computer and set '
+                      'up the right account for each, or add one yourself.',
+                  actionLabel: 'Scan this computer',
+                  onAction: () => showSetupWizard(context),
+                  secondaryLabel: 'Add one project',
+                  onSecondary: () => _addRepo(context, ref),
                 );
               }
               return _RepoList(repos: repos);
