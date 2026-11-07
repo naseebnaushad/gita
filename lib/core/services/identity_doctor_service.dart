@@ -136,7 +136,9 @@ class IdentityDoctorService {
           message: '"${profile.label}" has a GitHub sign-in saved, but the '
               "gita command isn't installed at ${paths.cliPath}, so pushes "
               "can't use it yet. Pushes will use whichever GitHub account "
-              'this computer remembers, which may be the wrong one.',
+              'this computer remembers, which may be the wrong one. Gita '
+              'installs the command each time it starts: close and reopen '
+              'Gita. If this message stays, reinstall Gita.',
           profileId: profile.id,
         ));
       } else if (!hasToken && profile.sshKeyId == null) {
