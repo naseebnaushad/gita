@@ -1,0 +1,16 @@
+{
+  "name": "gita",
+  "owner": {
+    "name": "naseebnaushad"
+  },
+  "metadata": {
+    "description": "Gita keeps each git project on the right GitHub account."
+  },
+  "plugins": [
+    {
+      "name": "gita",
+      "source": "./claude-plugin",
+      "description": "Lets Claude Code ask Gita which GitHub account a project uses before it commits, pushes or clones."
+    }
+  ]
+}
