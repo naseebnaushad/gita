@@ -22,6 +22,18 @@ class GitService {
     );
   }
 
+  /// Starts a long-running git command (like `clone`) whose output the
+  /// caller streams.
+  Future<Process> start(List<String> args, {String? workingDir, Map<String, String>? environment}) {
+    return Process.start(
+      'git',
+      args,
+      workingDirectory: workingDir,
+      environment: {...?_environmentOverride, ...?environment},
+      includeParentEnvironment: true,
+    );
+  }
+
   /// Runs any git command. For callers that need output this class has no
   /// dedicated method for.
   Future<ProcessResult> raw(List<String> args, {String? workingDir}) =>

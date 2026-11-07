@@ -16,6 +16,7 @@ import '../../widgets/initials_avatar.dart';
 import '../../widgets/screen_header.dart';
 import '../../widgets/status_chip.dart';
 import '../setup/setup_wizard.dart';
+import 'clone_dialog.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -31,6 +32,12 @@ class DashboardScreen extends ConsumerWidget {
           title: 'Dashboard',
           subtitle: 'Tracked repositories and their resolved identity.',
           actions: [
+            OutlinedButton.icon(
+              onPressed: () => _clone(context),
+              icon: const Icon(Icons.download_outlined, size: 18),
+              label: const Text('Clone a project'),
+            ),
+            const SizedBox(width: 8),
             FilledButton.icon(
               onPressed: () => _addRepo(context, ref),
               icon: const Icon(Icons.create_new_folder_outlined, size: 18),
@@ -60,6 +67,18 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Future<void> _clone(BuildContext context) async {
+    final outcome = await showCloneDialog(context);
+    if (outcome == null || !context.mounted) return;
+    final extra = [
+      if (outcome.addedRule) 'Added a rule so it always uses this account.',
+      if (outcome.guardProblem != null) 'Safety check not added: ${outcome.guardProblem}',
+    ].join(' ');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('${outcome.message} $extra'.trim()), duration: const Duration(seconds: 8)),
     );
   }
 

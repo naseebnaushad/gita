@@ -10,6 +10,7 @@ import 'models/repo_rule.dart';
 import 'models/ssh_key.dart';
 import 'models/tracked_repo.dart';
 import 'services/cli_installer.dart';
+import 'services/clone_service.dart';
 import 'services/doctor_fixes.dart';
 import 'services/git_config_sync.dart';
 import 'services/git_service.dart';
@@ -356,6 +357,40 @@ final machineScannerProvider = Provider(
 );
 
 final setupActionsProvider = Provider((ref) => SetupActions(ref));
+
+final cloneServiceProvider = Provider(
+  (ref) => CloneService(paths: ref.watch(platformPathsProvider), git: ref.watch(gitServiceProvider)),
+);
+
+/// Clones a project as a profile, then refreshes the screens that show
+/// rules and projects.
+final cloneActionsProvider = Provider((ref) => CloneActions(ref));
+
+class CloneActions {
+  CloneActions(this._ref);
+
+  final Ref _ref;
+
+  Future<CloneOutcome> clone({
+    required String url,
+    required String destination,
+    required Profile profile,
+    void Function(String line)? onProgress,
+  }) async {
+    final outcome = await _ref.read(cloneServiceProvider).clone(
+          url: url,
+          destination: destination,
+          profile: profile,
+          hasToken: _ref.read(secureTokenServiceProvider).hasToken,
+          onProgress: onProgress,
+        );
+    _ref
+      ..invalidate(repoRulesProvider)
+      ..invalidate(trackedReposProvider)
+      ..invalidate(doctorIssuesProvider);
+    return outcome;
+  }
+}
 
 /// What [SetupActions.apply] made.
 class SetupResult {
