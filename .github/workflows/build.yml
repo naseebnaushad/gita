@@ -190,6 +190,7 @@ jobs:
           cp linux/gita-linux-x64.tar.gz "$work/gita-linux-x64-$version.tar.gz"
           cp packaging/linux/gita.desktop "$work/gita-$version.desktop"
           cp assets/branding/icon.png "$work/gita-$version.png"
+          cp LICENSE "$work/gita-LICENSE-$version"
           chown -R builder "$work"
           cd "$work"
           sudo -u builder env GITA_VERSION="$version" makepkg --noconfirm --nodeps
