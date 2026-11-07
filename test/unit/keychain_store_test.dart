@@ -5,8 +5,9 @@ import 'package:gita/core/services/keychain_store.dart';
 
 /// Round-trips a throwaway secret through this machine's real credential
 /// store. Runs where the store is reachable without user interaction
-/// (Windows Credential Manager); the macOS and Linux stores can prompt or
-/// need a desktop session, so they are skipped here.
+/// (Windows Credential Manager). The macOS and Linux stores can prompt or
+/// need a desktop session, so they only run when GITA_TEST_KEYCHAIN=1 (the
+/// macOS CI runner has an unlocked login Keychain).
 void main() {
   final key = 'test.${DateTime.now().microsecondsSinceEpoch}';
   final store = KeychainStore.forPlatform();
@@ -27,5 +28,6 @@ void main() {
 
     // Deleting something that isn't there is fine.
     await store.delete(key);
-  }, skip: !Platform.isWindows);
+  }, skip: !(Platform.isWindows ||
+      (Platform.isMacOS && Platform.environment['GITA_TEST_KEYCHAIN'] == '1')));
 }

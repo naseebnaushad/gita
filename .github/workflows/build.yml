@@ -2,8 +2,7 @@
 #
 # - Pull requests and pushes to master: tests + the three builds. The
 #   built apps can be downloaded from the run's "Artifacts" section.
-# - A tag like v1.2.0: the same, then a draft GitHub release with the
-#   three downloads attached. Check it and press "Publish".
+# - Releases: see release.yml, which calls this workflow on a v* tag.
 # - "Run workflow" on the Actions tab: the same as a pull request.
 #
 # Each build includes the `gita` command (in a `cli` folder inside the
@@ -14,8 +13,8 @@ on:
   pull_request:
   push:
     branches: [master]
-    tags: ['v*']
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -47,6 +46,28 @@ jobs:
           git config --global user.email "ci@example.com"
           git config --global init.defaultBranch main
           flutter test
+
+  test-macos:
+    name: Tests (macOS)
+    runs-on: macos-latest
+    # Advisory for now: some macOS tests still fail and don't block builds.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: flutter test
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.com"
+          git config --global init.defaultBranch main
+          # GITA_TEST_KEYCHAIN also runs the test that round-trips a secret
+          # through the real login Keychain.
+          GITA_TEST_KEYCHAIN=1 flutter test
 
   build:
     name: Build (${{ matrix.name }})
@@ -80,7 +101,7 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libgtk-3-dev libsecret-1-dev libjsoncpp-dev
+          sudo apt-get install -y ninja-build libgtk-3-dev libsecret-1-dev libsecret-tools libjsoncpp-dev
 
       - run: flutter pub get
       - run: flutter build ${{ matrix.target }} --release
@@ -100,6 +121,7 @@ jobs:
           app="build/macos/Build/Products/Release/gita.app"
           "$app/Contents/Resources/cli/bin/gita" --version
           codesign --verify --deep --strict "$app"
+          scripts/smoke_cli.sh "$app/Contents/Resources/cli/bin/gita"
           ditto -c -k --keepParent "$app" "${{ matrix.asset }}"
 
       - name: Package (Linux)
@@ -107,6 +129,7 @@ jobs:
         run: |
           bundle="build/linux/x64/release/bundle"
           "$bundle/cli/bin/gita" --version
+          scripts/smoke_cli.sh "$bundle/cli/bin/gita"
           tar -czf "${{ matrix.asset }}" -C "$bundle" .
 
       - uses: actions/upload-artifact@v4
@@ -114,25 +137,3 @@ jobs:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
           if-no-files-found: error
-
-  release:
-    name: Draft release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Create a draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ls -l dist
-          gh release create "${{ github.ref_name }}" dist/* \
-            --repo "${{ github.repository }}" \
-            --draft --generate-notes \
-            --title "Gita ${{ github.ref_name }}"
