@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Gita
+Comment=Keep each git project on the right GitHub account
+Exec=/opt/gita/gita
+Icon=gita
+Terminal=false
+Categories=Development;Utility;
+Keywords=git;github;account;ssh;
