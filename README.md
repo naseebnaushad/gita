@@ -61,6 +61,9 @@ and rules the app saves.
 gita which [folder]    # which account should this project use, and which is it using?
 gita check [folder]    # same, but exits 1 if it would commit/push as the wrong account
 gita doctor            # find setup problems before they break a commit or push
+gita guard install [folder]   # add the safety check to a project (the app does this for you)
+gita guard remove [folder]    # take it out again
+gita guard status [folder]    # is it in place?
 ```
 
 Add `--json` to any command for machine-readable output. Exit codes:
@@ -75,6 +78,38 @@ dart build cli          # -> build/cli/<platform>/bundle/bin/gita(.exe)
 
 (`dart compile exe` doesn't work here because some Flutter plugin
 dependencies use native build hooks; `dart build cli` handles them.)
+
+### The safety check: wrong-account commits and pushes are stopped
+
+When you add a project on the Dashboard, Gita puts a small safety check
+into it (git `pre-commit` and `pre-push` hooks). From then on:
+
+- A **commit** made with the wrong email for that project is stopped
+  before it happens, with a message saying which account the project
+  belongs to and what to do.
+- A **push** that contains commits made with another email (for example
+  ones made before the project had a rule) is stopped. The message lists
+  those commits and gives the one command that re-makes them with the
+  right email (`git commit --amend --no-edit --reset-author` for a single
+  latest commit, or a `git rebase ... --exec` that fixes them all). Only
+  commits no remote has yet are checked, so teammates' commits never
+  count.
+- To get past the check just once, add `--no-verify` to the `git commit`
+  or `git push`.
+
+Details for the curious:
+
+- A hook the project already had is kept as `pre-commit.local` /
+  `pre-push.local` and still runs after Gita's check. Removing the check
+  (`gita guard remove`) puts it back.
+- Projects that keep hooks somewhere else (`core.hooksPath`, for example
+  husky) are left alone; the app tells you so when you add them.
+- If the `gita` command isn't installed, the hooks let everything through,
+  so uninstalling Gita never blocks anyone.
+- Projects no rule covers are never blocked.
+- The Dashboard and `gita check` show a warning for a tracked project
+  without the check, and Gita updates checks written by an older version
+  each time it starts.
 
 ### HTTPS pushes with the right account
 

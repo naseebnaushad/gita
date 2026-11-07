@@ -51,7 +51,8 @@ class _HomeShellState extends ConsumerState<_HomeShell> {
     ref.read(cliInstallProvider.future).then((result) {
       if (result.status == CliInstallStatus.failed) debugPrint('$result');
     }, onError: (Object e) => debugPrint('Installing the gita command failed: $e'))
-        .whenComplete(_moveOldTokens);
+        .whenComplete(_moveOldTokens)
+        .whenComplete(_updateGuards);
   }
 
   /// Moves sign-ins saved by older Gita versions into the OS credential
@@ -68,6 +69,15 @@ class _HomeShellState extends ConsumerState<_HomeShell> {
       }
     } catch (e) {
       debugPrint('Moving old sign-ins failed: $e');
+    }
+  }
+
+  /// Updates safety checks an older Gita put into tracked projects.
+  Future<void> _updateGuards() async {
+    try {
+      await ref.read(trackedReposProvider.notifier).updateOutdatedGuards();
+    } catch (e) {
+      debugPrint('Updating safety checks failed: $e');
     }
   }
 

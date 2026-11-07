@@ -12,6 +12,7 @@ import 'services/github_device_flow.dart';
 import 'services/github_oauth_config.dart';
 import 'services/github_ssh_keys.dart';
 import 'services/gpg_service.dart';
+import 'services/hook_service.dart';
 import 'services/identity_doctor_service.dart';
 import 'services/mismatch_detector.dart';
 import 'services/platform_paths.dart';
@@ -30,10 +31,15 @@ final gitConfigServiceProvider =
 final sshConfigServiceProvider =
     Provider((ref) => SshConfigService(paths: ref.watch(platformPathsProvider)));
 
+final hookServiceProvider = Provider(
+  (ref) => HookService(paths: ref.watch(platformPathsProvider), git: ref.watch(gitServiceProvider)),
+);
+
 final mismatchDetectorProvider = Provider(
   (ref) => MismatchDetector(
     gitService: ref.watch(gitServiceProvider),
     sshConfigService: ref.watch(sshConfigServiceProvider),
+    hookService: ref.watch(hookServiceProvider),
   ),
 );
 
@@ -205,10 +211,31 @@ class TrackedReposNotifier extends AsyncNotifier<List<TrackedRepo>> {
   @override
   Future<List<TrackedRepo>> build() => ref.watch(trackedRepoRepositoryProvider).getAll();
 
-  Future<void> add(String path) async {
-    final repo = TrackedRepo(path: path, lastScanned: DateTime.now());
+  /// Tracks [path] and adds Gita's safety check to it. Returns what
+  /// happened with the safety check, so the screen can explain a project
+  /// that runs its own hooks.
+  Future<GuardResult> add(String path) async {
+    final guard = await ref.read(hookServiceProvider).install(path);
+    final repo = TrackedRepo(
+      path: path,
+      lastScanned: DateTime.now(),
+      hookInstalled: guard.ok,
+    );
     await ref.read(trackedRepoRepositoryProvider).upsert(repo);
     state = AsyncData(await ref.read(trackedRepoRepositoryProvider).getAll());
+    return guard;
+  }
+
+  /// Brings safety checks written by an older Gita up to date. Projects
+  /// without one are left for the user (Doctor offers to add it).
+  Future<int> updateOutdatedGuards() async {
+    final hooks = ref.read(hookServiceProvider);
+    var updated = 0;
+    for (final repo in await ref.read(trackedRepoRepositoryProvider).getAll()) {
+      if ((await hooks.status(repo.path)).state != GuardState.outdated) continue;
+      if ((await hooks.install(repo.path)).ok) updated++;
+    }
+    return updated;
   }
 
   Future<void> remove(String path) async {

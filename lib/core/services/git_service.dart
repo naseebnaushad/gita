@@ -22,6 +22,11 @@ class GitService {
     );
   }
 
+  /// Runs any git command. For callers that need output this class has no
+  /// dedicated method for.
+  Future<ProcessResult> raw(List<String> args, {String? workingDir}) =>
+      _run(args, workingDir: workingDir);
+
   Future<bool> isGitRepo(String path) async {
     final result = await _run(
       ['rev-parse', '--is-inside-work-tree'],

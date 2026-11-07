@@ -8,10 +8,12 @@ import '../core/models/mismatch_report.dart';
 import '../core/models/profile.dart';
 import '../core/models/repo_rule.dart';
 import '../core/services/git_service.dart';
+import '../core/services/hook_service.dart';
 import '../core/services/identity_doctor_service.dart';
 import '../core/services/mismatch_detector.dart';
 import '../core/services/path_resolver.dart';
 import '../core/services/platform_paths.dart';
+import '../core/services/push_guard.dart';
 import '../core/services/ssh_config_service.dart';
 import '../core/services/token_store.dart';
 import '../core/storage/repositories.dart';
@@ -48,6 +50,7 @@ class GitaCli {
     IdentityDoctorService? doctorService,
     TokenStore? tokenStore,
     this.input,
+    this.cwd = '.',
   }) : tokenStore = tokenStore ?? TokenStore() {
     this.doctorService = doctorService ??
         IdentityDoctorService(paths: paths, tokenStore: this.tokenStore);
@@ -63,6 +66,10 @@ class GitaCli {
   /// What git writes to the credential helper. Defaults to stdin.
   final Stream<List<int>>? input;
 
+  /// The folder commands without a folder argument work on (hooks run in
+  /// the project folder).
+  final String cwd;
+
   static const version = '0.1.0';
 
   ArgParser _buildParser() {
@@ -75,6 +82,8 @@ class GitaCli {
       ..addCommand('which', command())
       ..addCommand('check', command())
       ..addCommand('doctor', command())
+      ..addCommand('guard', command())
+      ..addCommand('hook', ArgParser(allowTrailingOptions: false))
       ..addCommand(
         'credential',
         ArgParser()
@@ -103,7 +112,7 @@ class GitaCli {
 
     final command = results.command;
     final wantsHelp =
-        results['help'] as bool || (command?['help'] as bool? ?? false);
+        results['help'] as bool || (command != null && command.options.contains('help') && command['help'] as bool);
     if (wantsHelp) {
       out.write(_usage());
       return ExitCodes.ok;
@@ -118,6 +127,9 @@ class GitaCli {
       return ExitCodes.usage;
     }
 
+    if (command.name == 'hook') {
+      return _hook(command.rest);
+    }
     if (command.name == 'credential') {
       return _credential(command['profile'] as String?, command.rest);
     }
@@ -130,6 +142,8 @@ class GitaCli {
         return _check(command.rest, json: json);
       case 'doctor':
         return _doctor(json: json);
+      case 'guard':
+        return _guard(command.rest, json: json);
     }
     return ExitCodes.usage;
   }
@@ -146,6 +160,14 @@ Commands:
                    would commit or push with the wrong account.
   doctor           Look for setup problems (missing keys, broken rules)
                    before they cause a failed commit or push.
+  guard install [folder]
+                   Add Gita's safety check to a project, so a commit or
+                   push with the wrong account is stopped before it
+                   happens. (Gita does this for projects you add in the app.)
+  guard remove [folder]
+                   Take the safety check out again.
+  guard status [folder]
+                   Say whether the safety check is in place.
 
 [folder] defaults to the current folder.
 
@@ -219,7 +241,8 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
             'Follow the steps shown for this project\'s SSH key.',
           ],
         MismatchType.hookMissing => [
-            'Open Gita and go to Doctor to reinstall the safety check.',
+            'Run "gita guard install" in this project, or open Gita and go '
+                'to Doctor to add the safety check.',
           ],
       };
 
@@ -282,6 +305,133 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
         'ruleId': issue.ruleId,
         'sshKeyId': issue.sshKeyId,
       };
+
+  // ---------------------------------------------------------------- guard
+
+  Future<int> _guard(List<String> rest, {required bool json}) async {
+    const actions = ['install', 'remove', 'status'];
+    if (rest.isEmpty || !actions.contains(rest.first) || rest.length > 2) {
+      _fail('Usage: gita guard <install|remove|status> [folder]', json: json);
+      return ExitCodes.usage;
+    }
+    final action = rest.first;
+    final folder = rest.length == 2 ? rest[1] : cwd;
+    final hooks = HookService(paths: paths, git: gitService);
+    final result = switch (action) {
+      'install' => await hooks.install(folder),
+      'remove' => await hooks.uninstall(folder),
+      _ => await hooks.status(folder),
+    };
+    if (result.state == GuardState.notARepo) {
+      _fail(
+        "This folder isn't a git project: $folder\n"
+        'Run this from inside a project folder, or pass the project folder.',
+        json: json,
+      );
+      return ExitCodes.usage;
+    }
+    final ok = action == 'remove'
+        ? result.state == GuardState.missing
+        : result.state == GuardState.installed;
+    if (json) {
+      out.writeln(_encode({'ok': ok, 'state': result.state.name, 'message': result.message}));
+      return ok ? ExitCodes.ok : ExitCodes.problem;
+    }
+    final line = switch ((action, result.state)) {
+      ('install', GuardState.installed) =>
+        'Done: commits and pushes in this project are now checked for the right account.',
+      ('remove', GuardState.missing) => "Done: Gita's safety check is no longer in this project.",
+      ('status', GuardState.installed) => "Gita's safety check is in place.",
+      ('status', GuardState.outdated) =>
+        'The safety check is from an older Gita. Run "gita guard install" to update it.',
+      ('status', GuardState.missing) =>
+        'This project has no safety check yet. Run "gita guard install" to add it.',
+      _ => result.message ?? 'Something went wrong.',
+    };
+    out.writeln(line);
+    if (result.message != null && line != result.message) out.writeln(result.message);
+    return ok ? ExitCodes.ok : ExitCodes.problem;
+  }
+
+  // ----------------------------------------------------------------- hook
+
+  /// Run by the hooks `gita guard install` adds. Exit 0 lets git go on,
+  /// 1 stops the commit or push. Messages go to stderr, which git shows.
+  Future<int> _hook(List<String> rest) async {
+    if (rest.isEmpty || !HookService.hookNames.contains(rest.first)) {
+      err.writeln('Usage: gita hook <pre-commit|pre-push>');
+      return ExitCodes.usage;
+    }
+    final profiles = await ProfileRepository(paths: paths).getAll();
+    final rules = await RepoRuleRepository(paths: paths).getAll();
+    final guard = PushGuard(git: gitService);
+
+    if (rest.first == 'pre-commit') {
+      final verdict = await guard.checkCommit(cwd, profiles, rules);
+      if (verdict.allowed) return ExitCodes.ok;
+      final profile = verdict.profile!;
+      err
+        ..writeln()
+        ..writeln('Gita stopped this commit: it would be made as '
+            '${verdict.configuredEmail}, but this project belongs to '
+            '"${profile.label}" (${profile.gitEmail}).')
+        ..writeln()
+        ..writeln('What to do:')
+        ..writeln('  - Open Gita and go to Doctor. It can fix this project for you.')
+        ..writeln('  - If this project really belongs to another account, change '
+            'its rule in Gita under Rules.')
+        ..writeln()
+        ..writeln('To commit anyway, just this once: git commit --no-verify')
+        ..writeln();
+      return ExitCodes.problem;
+    }
+
+    final refs = await (input ?? stdin).transform(utf8.decoder).join();
+    final verdict = await guard.checkPush(cwd, profiles, rules, refs);
+    if (verdict.allowed) return ExitCodes.ok;
+    final profile = verdict.profile!;
+    final wrong = verdict.wrongCommits;
+    final count = wrong.length == 1 ? '1 commit was' : '${wrong.length} commits were';
+    err
+      ..writeln()
+      ..writeln('Gita stopped this push: $count made with another email, but this '
+          'project belongs to "${profile.label}" (${profile.gitEmail}).')
+      ..writeln();
+    for (final c in wrong.take(10)) {
+      err.writeln('  ${c.sha.substring(0, 7)}  ${c.email}  ${c.subject}');
+    }
+    if (wrong.length > 10) err.writeln('  ... and ${wrong.length - 10} more');
+    final configuredRight = verdict.configuredEmail != null &&
+        verdict.configuredEmail!.toLowerCase() == profile.gitEmail.toLowerCase();
+    err
+      ..writeln()
+      ..writeln('What to do:');
+    var step = 1;
+    if (!configuredRight) {
+      err.writeln('  ${step++}. Open Gita and go to Doctor, so new commits here '
+          'use ${profile.gitEmail}.');
+    }
+    final amendIsEnough = wrong.length == 1 && _isTip(wrong.single, refs);
+    final fix = amendIsEnough
+        ? 'git commit --amend --no-edit --reset-author'
+        : 'git rebase --rebase-merges ${verdict.rebaseBase ?? '--root'} '
+            '--exec "git commit --amend --no-edit --reset-author"';
+    err
+      ..writeln('  ${step++}. Re-make the ${wrong.length == 1 ? 'commit' : 'commits'} '
+          'with the right email by running:')
+      ..writeln('       $fix')
+      ..writeln('  ${step++}. Push again.')
+      ..writeln()
+      ..writeln('To push anyway, just this once: git push --no-verify')
+      ..writeln();
+    return ExitCodes.problem;
+  }
+
+  /// Whether [commit] is the tip of a ref being pushed, so amending it is
+  /// enough to fix it.
+  bool _isTip(WrongCommit commit, String refs) => refs
+      .split('\n')
+      .any((l) => l.trim().split(RegExp(r'\s+')).elementAtOrNull(1) == commit.sha);
 
   // ----------------------------------------------------------- credential
 
@@ -393,6 +543,7 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
     final detector = MismatchDetector(
       gitService: gitService,
       sshConfigService: SshConfigService(paths: paths),
+      hookService: HookService(paths: paths, git: gitService),
     );
     final report = await detector.check(
       repoPath: repoPath,
