@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io' show stdin;
+import 'dart:io';
 
 import 'package:args/args.dart';
 
@@ -7,7 +7,10 @@ import '../core/models/doctor_issue.dart';
 import '../core/models/mismatch_report.dart';
 import '../core/models/profile.dart';
 import '../core/models/repo_rule.dart';
+import '../core/services/git_config_sync.dart';
 import '../core/services/git_service.dart';
+import '../core/services/github_device_flow.dart';
+import '../core/services/github_oauth_config.dart';
 import '../core/services/hook_service.dart';
 import '../core/services/identity_doctor_service.dart';
 import '../core/services/mismatch_detector.dart';
@@ -51,7 +54,10 @@ class GitaCli {
     TokenStore? tokenStore,
     this.input,
     this.cwd = '.',
-  }) : tokenStore = tokenStore ?? TokenStore() {
+    this.deviceFlow,
+    Future<bool> Function(Uri url)? openBrowser,
+  })  : tokenStore = tokenStore ?? TokenStore(),
+        openBrowser = openBrowser ?? defaultOpenBrowser {
     this.doctorService = doctorService ??
         IdentityDoctorService(paths: paths, tokenStore: this.tokenStore);
   }
@@ -70,6 +76,12 @@ class GitaCli {
   /// the project folder).
   final String cwd;
 
+  /// GitHub sign-in for `gita sign-in`. Defaults to Gita's OAuth app.
+  final GitHubDeviceFlow? deviceFlow;
+
+  /// Opens the GitHub sign-in page for `gita sign-in`.
+  final Future<bool> Function(Uri url) openBrowser;
+
   static const version = '0.1.0';
 
   ArgParser _buildParser() {
@@ -83,6 +95,14 @@ class GitaCli {
       ..addCommand('check', command())
       ..addCommand('doctor', command())
       ..addCommand('guard', command())
+      ..addCommand('profiles', command())
+      ..addCommand(
+        'sign-in',
+        command()
+          ..addOption('profile', help: 'Name or id of the profile to sign in.')
+          ..addFlag('with-token', negatable: false, help: 'Read a token from stdin.')
+          ..addFlag('no-browser', negatable: false, help: "Don't open the browser."),
+      )
       ..addCommand('hook', ArgParser(allowTrailingOptions: false))
       ..addCommand(
         'credential',
@@ -144,6 +164,10 @@ class GitaCli {
         return _doctor(json: json);
       case 'guard':
         return _guard(command.rest, json: json);
+      case 'profiles':
+        return _profiles(json: json);
+      case 'sign-in':
+        return _signIn(command, json: json);
     }
     return ExitCodes.usage;
   }
@@ -168,6 +192,13 @@ Commands:
                    Take the safety check out again.
   guard status [folder]
                    Say whether the safety check is in place.
+  profiles         List your profiles: email, GitHub account, sign-in,
+                   SSH key and folders.
+  sign-in --profile <name or id>
+                   Sign a profile in to GitHub (shows a code to enter on
+                   github.com), so HTTPS pushes use that account.
+                   --with-token reads a token from stdin instead;
+                   --no-browser doesn't open the browser.
 
 [folder] defaults to the current folder.
 
@@ -181,6 +212,198 @@ Options:
 
 Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
 ''';
+
+  // ------------------------------------------------------------- profiles
+
+  Future<int> _profiles({required bool json}) async {
+    final profiles = await ProfileRepository(paths: paths).getAll();
+    final rules = await RepoRuleRepository(paths: paths).getAll();
+    final rows = <Map<String, Object?>>[];
+    for (final p in profiles) {
+      rows.add({
+        'id': p.id,
+        'label': p.label,
+        'name': p.gitName,
+        'email': p.gitEmail,
+        'githubLogin': p.githubLogin,
+        'signedIn': await tokenStore.hasToken(p.id),
+        'sshKey': p.sshKeyId != null,
+        'folders': [
+          for (final r in rules)
+            if (r.profileId == p.id) r.pathPattern,
+        ],
+      });
+    }
+    if (json) {
+      out.writeln(_encode({'ok': true, 'profiles': rows}));
+      return ExitCodes.ok;
+    }
+    if (rows.isEmpty) {
+      out.writeln('No profiles yet. Open Gita and add one under Profiles.');
+      return ExitCodes.ok;
+    }
+    for (final r in rows) {
+      final login = r['githubLogin'] == null ? '' : '  @${r['githubLogin']}';
+      final signedIn = r['signedIn'] == true
+          ? 'saved'
+          : 'none (run "gita sign-in --profile ${r['id']}")';
+      final folders = r['folders']! as List;
+      out
+        ..writeln('${r['label']}  (id: ${r['id']})$login')
+        ..writeln('  Commits as:      ${r['name']} <${r['email']}>')
+        ..writeln('  GitHub sign-in:  $signedIn')
+        ..writeln('  SSH key:         ${r['sshKey'] == true ? 'yes' : 'no'}')
+        ..writeln(folders.isEmpty
+            ? '  Folders:         none yet (add a rule in Gita)'
+            : '  Folders:         ${folders.join(', ')}')
+        ..writeln();
+    }
+    return ExitCodes.ok;
+  }
+
+  // -------------------------------------------------------------- sign-in
+
+  /// Signs a profile in to GitHub: either the device flow (show a code,
+  /// open github.com/login/device, wait) or, with --with-token, a token
+  /// read from stdin. Saves the token, records the account on the profile
+  /// and turns on HTTPS pushes for it.
+  Future<int> _signIn(ArgResults command, {required bool json}) async {
+    final wanted = command['profile'] as String?;
+    if (wanted == null || wanted.trim().isEmpty) {
+      _fail('Say which profile to sign in: gita sign-in --profile <name or id>', json: json);
+      return ExitCodes.usage;
+    }
+    final repo = ProfileRepository(paths: paths);
+    final profiles = await repo.getAll();
+    final profile = _findProfile(profiles, wanted);
+    if (profile == null) {
+      final names = profiles.map((p) => '"${p.label}" (${p.id})').join(', ');
+      _fail(
+        'There is no profile called "$wanted".'
+        '${names.isEmpty ? ' Add one in Gita first.' : ' Profiles: $names'}',
+        json: json,
+      );
+      return ExitCodes.usage;
+    }
+
+    final flow = deviceFlow ?? _defaultDeviceFlow();
+    final String token;
+    final GitHubAccount account;
+    try {
+      if (command['with-token'] as bool) {
+        token = (await (input ?? stdin).transform(utf8.decoder).join()).trim();
+        if (token.isEmpty) {
+          _fail(
+            'No token was given. Pipe it in, for example: '
+            'echo <token> | gita sign-in --profile ${profile.id} --with-token',
+            json: json,
+          );
+          return ExitCodes.usage;
+        }
+        // Only the GitHub API is used here; the client ID doesn't matter.
+        account = await (flow ?? GitHubDeviceFlow(clientId: '')).fetchAccount(token);
+      } else {
+        if (flow == null) {
+          _fail(
+            'This copy of Gita has no GitHub sign-in app set up. Create a token '
+            'on github.com and pipe it in with --with-token instead.',
+            json: json,
+          );
+          return ExitCodes.problem;
+        }
+        final code = await flow.start();
+        if (json) {
+          out.writeln(jsonEncode({
+            'step': 'enter-code',
+            'code': code.userCode,
+            'url': code.verificationUri.toString(),
+          }));
+        } else {
+          out
+            ..writeln('Signing "${profile.label}" in to GitHub.')
+            ..writeln()
+            ..writeln('  1. Open ${code.verificationUri}')
+            ..writeln('  2. Sign in as the GitHub account for "${profile.label}".')
+            ..writeln('  3. Enter this code: ${code.userCode}')
+            ..writeln('  4. Press Authorize.')
+            ..writeln()
+            ..writeln('Waiting for GitHub...');
+        }
+        if (!(command['no-browser'] as bool)) await openBrowser(code.verificationUri);
+        token = await flow.waitForToken(code);
+        account = await flow.fetchAccount(token);
+      }
+    } on DeviceFlowException catch (e) {
+      _fail(e.message, json: json);
+      return ExitCodes.problem;
+    }
+
+    await tokenStore.saveToken(profile.id, token);
+    final updated = profile.copyWith(githubLogin: account.login);
+    await repo.upsert(updated);
+    await syncGitConfig(
+      paths: paths,
+      hasToken: tokenStore.hasToken,
+      profiles: [for (final p in profiles) p.id == updated.id ? updated : p],
+    );
+
+    final email = account.email;
+    final emailNote = email != null && email.toLowerCase() != profile.gitEmail.toLowerCase()
+        ? "Note: this GitHub account's main email is $email, but "
+            '"${profile.label}" commits as ${profile.gitEmail}. That is fine if '
+            '${profile.gitEmail} is also added to the account on GitHub.'
+        : null;
+    final previous = profile.githubLogin;
+    final switched = previous != null && previous.toLowerCase() != account.login.toLowerCase()
+        ? '"${profile.label}" was signed in as @$previous before; it now uses @${account.login}.'
+        : null;
+    if (json) {
+      out.writeln(_encode({
+        'ok': true,
+        'profile': profile.id,
+        'githubLogin': account.login,
+        'previousLogin': ?(switched == null ? null : previous),
+        'note': ?emailNote,
+      }));
+    } else {
+      out
+        ..writeln()
+        ..writeln('Done: "${profile.label}" is signed in as @${account.login}. '
+            'Pushes over HTTPS in its folders now use this account.');
+      if (switched != null) out.writeln(switched);
+      if (emailNote != null) out.writeln(emailNote);
+    }
+    return ExitCodes.ok;
+  }
+
+  static Profile? _findProfile(List<Profile> profiles, String wanted) {
+    final w = wanted.trim().toLowerCase();
+    return profiles.where((p) => p.id.toLowerCase() == w).firstOrNull ??
+        profiles.where((p) => p.label.toLowerCase() == w).firstOrNull;
+  }
+
+  static GitHubDeviceFlow? _defaultDeviceFlow() {
+    final clientId = resolveGitHubClientId();
+    return clientId == null ? null : GitHubDeviceFlow(clientId: clientId);
+  }
+
+  /// Opens [url] in the default browser. Failing is fine: the printed
+  /// steps say where to go.
+  static Future<bool> defaultOpenBrowser(Uri url) async {
+    try {
+      final ProcessResult result;
+      if (Platform.isWindows) {
+        result = await Process.run('rundll32', ['url.dll,FileProtocolHandler', url.toString()]);
+      } else if (Platform.isMacOS) {
+        result = await Process.run('open', [url.toString()]);
+      } else {
+        result = await Process.run('xdg-open', [url.toString()]);
+      }
+      return result.exitCode == 0;
+    } on ProcessException {
+      return false;
+    }
+  }
 
   // ---------------------------------------------------------------- which
 

@@ -11,7 +11,11 @@ class FakeGitHub implements GitHubHttp {
     this.emails,
     this.addKeyAnswer = const GitHubResponse(201, '{}'),
     this.meta,
+    this.userStatus = 200,
   });
+
+  /// Status GET /user answers with (401 = GitHub refused the token).
+  final int userStatus;
 
   /// Answers to successive polls of /login/oauth/access_token.
   final List<Map<String, Object?>> tokenAnswers;
@@ -50,7 +54,7 @@ class FakeGitHub implements GitHubHttp {
   @override
   Future<GitHubResponse> get(Uri uri, String token) async {
     gets.add((uri, token));
-    if (uri.path == '/user') return GitHubResponse(200, jsonEncode(user));
+    if (uri.path == '/user') return GitHubResponse(userStatus, jsonEncode(user));
     if (uri.path == '/user/emails') {
       return emails == null
           ? const GitHubResponse(403, '{}')

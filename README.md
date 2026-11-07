@@ -61,6 +61,8 @@ and rules the app saves.
 gita which [folder]    # which account should this project use, and which is it using?
 gita check [folder]    # same, but exits 1 if it would commit/push as the wrong account
 gita doctor            # find setup problems before they break a commit or push
+gita profiles          # list profiles: email, GitHub account, sign-in, SSH key, folders
+gita sign-in --profile <name>   # sign a profile in to GitHub (shows a code to enter)
 gita guard install [folder]   # add the safety check to a project (the app does this for you)
 gita guard remove [folder]    # take it out again
 gita guard status [folder]    # is it in place?
@@ -155,6 +157,34 @@ mkdir -p ~/.gita/bin && cp build/cli/*/bundle/bin/gita ~/.gita/bin/
 ```
 
 then open each profile in Gita and press Save again.
+
+#### Signing in from the command line
+
+`gita sign-in` does the same as **Sign in with GitHub** in the app, for
+people who live in a terminal or set up machines with a script:
+
+```
+gita sign-in --profile Work
+```
+
+1. It prints a short code and opens github.com/login/device.
+2. Sign in there as the GitHub account for that profile, enter the code and
+   press Authorize.
+3. Gita saves the sign-in, remembers which GitHub account it is, and turns
+   on HTTPS pushes for the profile's folders.
+
+`--profile` takes the profile's name or id (`gita profiles` lists them).
+`--no-browser` only prints the steps. To use a token you already have
+instead, pipe it in:
+
+```
+echo "$TOKEN" | gita sign-in --profile Work --with-token
+```
+
+If GitHub refuses the token, nothing is saved and the command says so. If
+the account's main email isn't the one the profile commits with, the
+command points that out, because GitHub then won't link the commits to the
+account unless that email is added to it.
 
 ### SSH pushes with the right account
 
