@@ -147,9 +147,13 @@ void main() {
           'Ov23liX');
     });
 
-    test('is null when nothing is configured', () {
-      // Tests run without --dart-define, so there is no built-in ID.
-      expect(resolveGitHubClientId(environment: {}), isNull);
+    test("defaults to Gita's own OAuth app", () {
+      // Tests run without --dart-define, so the built-in default applies.
+      expect(resolveGitHubClientId(environment: {}), gitaGitHubClientId);
+    });
+
+    test('is null when a build switches sign-in off', () {
+      expect(resolveGitHubClientId(environment: {}, builtIn: ''), isNull);
     });
   });
 
