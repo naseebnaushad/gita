@@ -24,6 +24,8 @@ push where the effective identity doesn't match what's expected for that repo.
   an optional GitHub access token that HTTPS pushes from that profile's
   projects sign in with (stored in the OS keychain/Credential
   Manager/libsecret, never in a plain file) per identity.
+- **SSH keys** — one key per profile, made and added to the GitHub account
+  by Gita, so `git@github.com:` pushes also use the right account.
 - **Rules** — map a folder to a profile; Gita writes a managed `includeIf`
   block into `~/.gitconfig` so Git resolves the right identity per repo
   automatically.
@@ -33,9 +35,8 @@ push where the effective identity doesn't match what's expected for that repo.
   profile with commit signing enabled but no matching GPG key on this
   machine) before it turns into a failed commit or push.
 
-Planned: SSH key manager with host aliasing, a pre-push hook that blocks
-mismatched pushes outright, remote URL rewriting, and a credential-helper
-inspector.
+Planned: a pre-push hook that blocks mismatched pushes outright, and a
+credential-helper inspector.
 
 ## Getting started
 
@@ -120,6 +121,38 @@ mkdir -p ~/.gita/bin && cp build/cli/*/bundle/bin/gita ~/.gita/bin/
 
 then open each profile in Gita and press Save again.
 
+### SSH pushes with the right account
+
+For projects whose remote looks like `git@github.com:org/repo.git`, press
+**Set up SSH** in a profile. Gita:
+
+1. makes a new key for that profile, `~/.ssh/gita_<profile>` (ed25519, no
+   passphrase, so pushes never stop to ask for one);
+2. adds GitHub's published host keys to `~/.ssh/known_hosts` if they
+   aren't there, so the first push doesn't ask "Are you sure you want to
+   continue connecting?";
+3. adds the key to the profile's GitHub account, if the profile is signed
+   in with GitHub. Otherwise it shows the key with **Copy key** and **Open
+   GitHub** buttons and three short steps;
+4. checks which account GitHub sees for the key, and warns if it is not
+   the profile's account.
+
+The profile's include file then tells git to use that key:
+
+```
+[core]
+    sshCommand = "ssh -i \"/home/me/.ssh/gita_work\" -o IdentitiesOnly=yes"
+```
+
+So remotes stay as they are: no host aliases, no rewritten URLs.
+`IdentitiesOnly=yes` stops git from using keys loaded in an SSH agent,
+which belong to whichever account they were made for. **Check** in the
+profile runs the account check again at any time; **Remove** takes the
+key off the profile but leaves the files in `~/.ssh`.
+
+Profiles signed in before Gita asked for `write:public_key` get the
+manual steps; signing in again lets Gita add keys by itself.
+
 ### Sign in with GitHub
 
 Instead of creating and pasting a token, people can press **Sign in with
@@ -130,8 +163,9 @@ saves the resulting token for that profile and shows which account it is
 in from the GitHub account.
 
 The token asks for `repo` (push to private repos), `workflow` (push
-changes to `.github/workflows`), and `read:user` and `user:email` (to show
-the account and fill in the email).
+changes to `.github/workflows`), `read:user` and `user:email` (to show
+the account and fill in the email), and `write:public_key` (to add the
+profile's SSH key to the account).
 
 Gita signs in through its own GitHub OAuth app, "Gita"
 (client ID `Ov23licOLgsWLhLzch9w`, built in, nothing to set up). On

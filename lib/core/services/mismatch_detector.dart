@@ -72,7 +72,11 @@ class MismatchDetector {
     if (remoteUrl != null && expectedProfile.sshKeyId != null) {
       final expectedKey = sshKeysById[expectedProfile.sshKeyId];
       final host = SshConfigService.hostFromRemoteUrl(remoteUrl);
-      if (expectedKey != null && host != null && host == expectedKey.hostAlias) {
+      // Keys Gita sets up use the real host plus core.sshCommand, so there
+      // is no alias to resolve; only keys reached through an alias are
+      // checked against ~/.ssh/config.
+      final usesAlias = expectedKey != null && expectedKey.hostAlias != expectedKey.realHost;
+      if (usesAlias && host != null && host == expectedKey.hostAlias) {
         final resolvedIdentityFile = await sshConfigService.resolveIdentityFile(host);
         if (resolvedIdentityFile != null &&
             !_samePath(resolvedIdentityFile, expectedKey.privateKeyPath)) {
