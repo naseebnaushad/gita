@@ -6,6 +6,17 @@ enum DoctorCategory {
   missingSshKeyFile,
   orphanedSshKeyReference,
   orphanedRuleProfile,
+
+  /// A profile has no saved GitHub sign-in, so HTTPS pushes fall back to
+  /// whichever account this computer happens to remember.
+  missingPushToken,
+
+  /// A profile has a saved sign-in, but the `gita` command git needs to
+  /// use it isn't installed.
+  credentialHelperNotInstalled,
+
+  /// The OS credential store couldn't be read at all.
+  keychainUnavailable,
 }
 
 /// A config-drift problem found by [IdentityDoctorService], independent of

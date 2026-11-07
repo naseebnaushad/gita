@@ -6,6 +6,9 @@ import '../models/profile.dart';
 import '../models/repo_rule.dart';
 import '../models/ssh_key.dart';
 import 'gpg_service.dart';
+import 'keychain_store.dart';
+import 'platform_paths.dart';
+import 'token_store.dart';
 
 /// Scans profiles/rules/SSH keys for config drift that won't show up until
 /// a commit or push actually fails — e.g. a profile with signing enabled
@@ -13,9 +16,17 @@ import 'gpg_service.dart';
 /// was moved or deleted. Complements [MismatchDetector], which only checks
 /// one repo's live state against its expected profile.
 class IdentityDoctorService {
-  const IdentityDoctorService({this.gpgService = const GpgService()});
+  const IdentityDoctorService({
+    this.gpgService = const GpgService(),
+    this.paths = const PlatformPaths(),
+    this.tokenStore,
+  });
 
   final GpgService gpgService;
+  final PlatformPaths paths;
+
+  /// Where profile tokens live. Null skips the HTTPS sign-in checks.
+  final TokenStore? tokenStore;
 
   Future<List<DoctorIssue>> run({
     required List<Profile> profiles,
@@ -80,6 +91,8 @@ class IdentityDoctorService {
       }
     }
 
+    issues.addAll(await _pushSignInIssues(profiles));
+
     for (final rule in rules) {
       if (!profilesById.containsKey(rule.profileId)) {
         issues.add(DoctorIssue(
@@ -92,6 +105,52 @@ class IdentityDoctorService {
       }
     }
 
+    return issues;
+  }
+
+  Future<List<DoctorIssue>> _pushSignInIssues(List<Profile> profiles) async {
+    final store = tokenStore;
+    if (store == null || profiles.isEmpty) return const [];
+    final issues = <DoctorIssue>[];
+    final cliInstalled = File(paths.cliPath).existsSync();
+
+    for (final profile in profiles) {
+      final bool hasToken;
+      try {
+        hasToken = await store.hasToken(profile.id);
+      } on KeychainException catch (e) {
+        return [
+          DoctorIssue(
+            category: DoctorCategory.keychainUnavailable,
+            severity: Severity.warning,
+            message: "Gita couldn't open this computer's password store, "
+                "so it can't check GitHub sign-ins. ${e.message}",
+          ),
+        ];
+      }
+
+      if (hasToken && !cliInstalled) {
+        issues.add(DoctorIssue(
+          category: DoctorCategory.credentialHelperNotInstalled,
+          severity: Severity.warning,
+          message: '"${profile.label}" has a GitHub sign-in saved, but the '
+              "gita command isn't installed at ${paths.cliPath}, so pushes "
+              "can't use it yet. Pushes will use whichever GitHub account "
+              'this computer remembers, which may be the wrong one.',
+          profileId: profile.id,
+        ));
+      } else if (!hasToken && profile.sshKeyId == null) {
+        issues.add(DoctorIssue(
+          category: DoctorCategory.missingPushToken,
+          severity: Severity.warning,
+          message: '"${profile.label}" has no GitHub sign-in saved. Pushes '
+              'from its projects will use whichever GitHub account this '
+              'computer remembers, which may be the wrong one. Open '
+              'Profiles, edit "${profile.label}" and paste an access token.',
+          profileId: profile.id,
+        ));
+      }
+    }
     return issues;
   }
 }

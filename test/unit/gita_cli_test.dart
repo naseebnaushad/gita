@@ -7,8 +7,10 @@ import 'package:gita/core/models/profile.dart';
 import 'package:gita/core/models/repo_rule.dart';
 import 'package:gita/core/services/git_service.dart';
 import 'package:gita/core/services/gitconfig_service.dart';
+import 'package:gita/core/services/keychain_store.dart';
 import 'package:gita/core/services/path_resolver.dart';
 import 'package:gita/core/services/platform_paths.dart';
+import 'package:gita/core/services/token_store.dart';
 import 'package:gita/core/storage/repositories.dart';
 
 /// End-to-end tests for the headless CLI: real git, real includeIf
@@ -22,6 +24,7 @@ void main() {
   late GitService git;
   late StringBuffer out;
   late StringBuffer err;
+  late TokenStore tokens;
 
   final aiProfile = Profile(
     id: 'ai',
@@ -32,11 +35,13 @@ void main() {
     createdAt: DateTime(2026, 1, 1),
   );
 
-  Future<int> run(List<String> args) => GitaCli(
+  Future<int> run(List<String> args, {String stdin = ''}) => GitaCli(
         out: out,
         err: err,
         paths: paths,
         gitService: git,
+        tokenStore: tokens,
+        input: Stream.value(utf8.encode(stdin)),
       ).run(args);
 
   Future<void> assignWorkspaceTo(Profile profile) async {
@@ -69,6 +74,7 @@ void main() {
     expect(init.exitCode, 0);
     out = StringBuffer();
     err = StringBuffer();
+    tokens = TokenStore(keychain: InMemoryKeychainStore());
   });
 
   tearDown(() async {
@@ -154,6 +160,10 @@ void main() {
     test('--json lists issues such as a rule pointing at a deleted profile',
         () async {
       await ProfileRepository(paths: paths).upsert(aiProfile);
+      await tokens.saveToken('ai', 'ghp_test');
+      File(paths.cliPath)
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('');
       await RepoRuleRepository(paths: paths).upsert(
         const RepoRule(id: 'r', pathPattern: '/x', profileId: 'gone'),
       );
@@ -167,6 +177,99 @@ void main() {
       expect(issues.single['category'], 'orphanedRuleProfile');
     });
   });
+
+  group('doctor HTTPS sign-in', () {
+    Future<List<String>> categories() async {
+      out.clear();
+      await run(['doctor', '--json']);
+      final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+      return [for (final i in json['issues'] as List) i['category'] as String];
+    }
+
+    test('flags a profile with no saved token', () async {
+      await ProfileRepository(paths: paths).upsert(aiProfile);
+      expect(await categories(), ['missingPushToken']);
+    });
+
+    test('flags a saved token the gita command cannot use yet', () async {
+      await ProfileRepository(paths: paths).upsert(aiProfile);
+      await tokens.saveToken('ai', 'ghp_test');
+      expect(await categories(), ['credentialHelperNotInstalled']);
+
+      File(paths.cliPath)
+        ..parent.createSync(recursive: true)
+        ..writeAsStringSync('');
+      expect(await categories(), isEmpty);
+    });
+  });
+
+  group('credential helper', () {
+    String lines(List<String> l) => '${l.join('\n')}\n\n';
+    final request = lines(['protocol=https', 'host=github.com']);
+
+    setUp(() => ProfileRepository(paths: paths).upsert(aiProfile));
+
+    test('get answers with the profile token', () async {
+      await tokens.saveToken('ai', 'ghp_secret');
+
+      final code = await run(['credential', '--profile', 'ai', 'get'],
+          stdin: request);
+
+      expect(code, ExitCodes.ok);
+      expect(const LineSplitter().convert(out.toString()),
+          ['username=x-access-token', 'password=ghp_secret']);
+      expect(err.toString(), isEmpty);
+    });
+
+    test('get keeps the username git sent', () async {
+      await tokens.saveToken('ai', 'ghp_secret');
+
+      await run(['credential', '--profile', 'ai', 'get'],
+          stdin: lines(
+              ['protocol=https', 'host=github.com', 'username=dev-ai']));
+
+      expect(const LineSplitter().convert(out.toString()).first,
+          'username=dev-ai');
+    });
+
+    test('get without a token stops git and says how to fix it', () async {
+      final code = await run(['credential', '--profile', 'ai', 'get'],
+          stdin: request);
+
+      expect(code, ExitCodes.ok);
+      expect(out.toString().trim(), 'quit=1');
+      expect(err.toString(), contains('"AI projects"'));
+      expect(err.toString(), contains('Profiles'));
+    });
+
+    test('erase keeps the token and explains the rejection', () async {
+      await tokens.saveToken('ai', 'ghp_secret');
+
+      await run(['credential', '--profile', 'ai', 'erase'], stdin: request);
+
+      expect(await tokens.readToken('ai'), 'ghp_secret');
+      expect(err.toString(), contains('did not accept'));
+      expect(out.toString(), isEmpty);
+    });
+
+    test('store is a no-op', () async {
+      await run(['credential', '--profile', 'ai', 'store'],
+          stdin: lines([
+            'protocol=https',
+            'host=github.com',
+            'username=u',
+            'password=other',
+          ]));
+
+      expect(await tokens.readToken('ai'), isNull);
+      expect(out.toString(), isEmpty);
+    });
+
+    test('missing --profile is a usage error', () async {
+      expect(await run(['credential', 'get']), ExitCodes.usage);
+    });
+  });
+
 
   group('arguments', () {
     test('no command prints usage and exits 2', () async {
