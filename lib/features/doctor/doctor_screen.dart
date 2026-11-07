@@ -124,6 +124,7 @@ class _IssueTileState extends ConsumerState<_IssueTile> {
         DoctorFix.unlinkSshKey => await actions.unlinkSshKey(issue.profileId!),
         DoctorFix.deleteRule => await actions.deleteRule(issue.ruleId!),
         DoctorFix.installCli => await actions.installCli(),
+        DoctorFix.useCompanyProfile => await actions.useCompanyProfile(issue),
         DoctorFix.signIn => await _signIn(issue.profileId!),
         DoctorFix.setUpSshKey => await _openProfile(issue.profileId!),
       };

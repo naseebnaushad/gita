@@ -17,6 +17,17 @@ enum DoctorCategory {
 
   /// The OS credential store couldn't be read at all.
   keychainUnavailable,
+
+  /// A company organization's projects use a profile without a company
+  /// email.
+  companyEmailMismatch,
+
+  /// No profile commits with the company's email.
+  companyNoProfile,
+
+  /// A company organization has no account rule, so its projects use
+  /// whatever their folder says.
+  companyOwnerUnmapped,
 }
 
 /// A config-drift problem found by [IdentityDoctorService], independent of
@@ -32,6 +43,10 @@ class DoctorIssue {
   final String? ruleId;
   final String? sshKeyId;
 
+  /// For company issues: the GitHub organization and its host.
+  final String? githubOwner;
+  final String? host;
+
   const DoctorIssue({
     required this.category,
     required this.severity,
@@ -39,5 +54,7 @@ class DoctorIssue {
     this.profileId,
     this.ruleId,
     this.sshKeyId,
+    this.githubOwner,
+    this.host,
   });
 }

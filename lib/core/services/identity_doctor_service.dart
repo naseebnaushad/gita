@@ -5,6 +5,7 @@ import '../models/mismatch_report.dart' show Severity;
 import '../models/profile.dart';
 import '../models/repo_rule.dart';
 import '../models/ssh_key.dart';
+import 'company_setup.dart';
 import 'gpg_service.dart';
 import 'keychain_store.dart';
 import 'platform_paths.dart';
@@ -92,19 +93,89 @@ class IdentityDoctorService {
     }
 
     issues.addAll(await _pushSignInIssues(profiles));
+    issues.addAll(await _companyIssues(profiles, rules, profilesById));
 
     for (final rule in rules) {
       if (!profilesById.containsKey(rule.profileId)) {
-        issues.add(DoctorIssue(
-          category: DoctorCategory.orphanedRuleProfile,
-          severity: Severity.warning,
-          message: 'Rule for "${rule.pathPattern}" points at a profile '
-              'that no longer exists.',
-          ruleId: rule.id,
-        ));
+        issues.add(
+          DoctorIssue(
+            category: DoctorCategory.orphanedRuleProfile,
+            severity: Severity.warning,
+            message:
+                'Rule for "${rule.describe}" points at a profile '
+                'that no longer exists.',
+            ruleId: rule.id,
+          ),
+        );
       }
     }
 
+    return issues;
+  }
+
+  /// Checks each imported company setup: its organizations should use a
+  /// profile that commits with a company email.
+  Future<List<DoctorIssue>> _companyIssues(
+    List<Profile> profiles,
+    List<RepoRule> rules,
+    Map<String, Profile> profilesById,
+  ) async {
+    final issues = <DoctorIssue>[];
+    for (final setup in await CompanyService(paths: paths).load()) {
+      final companyProfiles = setup.companyProfiles(profiles);
+      final suggested = CompanyService.pickProfile(setup, profiles);
+      final domains = setup.emailDomains.map((d) => '@$d').join(' or ');
+      if (companyProfiles.isEmpty && setup.emailDomains.isNotEmpty) {
+        issues.add(
+          DoctorIssue(
+            category: DoctorCategory.companyNoProfile,
+            severity: Severity.warning,
+            message:
+                'No profile commits with a ${setup.name} email ($domains). '
+                'Add one under Profiles (or press "Scan this computer"), so '
+                '${setup.name} projects are committed with your work email.',
+          ),
+        );
+      }
+      for (final owner in setup.owners) {
+        final where = '${setup.host}/$owner';
+        final rule = setup.ruleFor(owner, rules);
+        if (rule == null) {
+          issues.add(
+            DoctorIssue(
+              category: DoctorCategory.companyOwnerUnmapped,
+              severity: Severity.warning,
+              message:
+                  'Projects from $where (${setup.name}) have no profile '
+                  'set, so they use whatever their folder says.'
+                  '${suggested == null ? '' : ' They should use "${suggested.label}".'}',
+              profileId: suggested?.id,
+              githubOwner: owner,
+              host: setup.host,
+            ),
+          );
+          continue;
+        }
+        final profile = profilesById[rule.profileId];
+        if (profile == null || setup.emailDomains.isEmpty) continue;
+        if (!setup.isCompanyEmail(profile.gitEmail)) {
+          issues.add(
+            DoctorIssue(
+              category: DoctorCategory.companyEmailMismatch,
+              severity: Severity.blocking,
+              message:
+                  'Projects from $where (${setup.name}) use "${profile.label}", '
+                  'which commits as ${profile.gitEmail}, not a $domains email.'
+                  '${suggested == null ? '' : ' They should use "${suggested.label}".'}',
+              profileId: suggested?.id,
+              ruleId: rule.id,
+              githubOwner: owner,
+              host: setup.host,
+            ),
+          );
+        }
+      }
+    }
     return issues;
   }
 

@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
+
+import '../models/repo_rule.dart';
 
 /// Thin wrapper around the `git` CLI. Never reimplements plumbing that
 /// `git config`, `git remote`, `git rev-parse` etc. already do (plan §2).
@@ -82,6 +85,31 @@ class GitService {
     if (result.exitCode != 0) return null;
     final value = (result.stdout as String).trim();
     return value.isEmpty ? null : value;
+  }
+
+  /// Every remote address the project has (`remote.<name>.url`, the
+  /// same values git's `hasconfig:remote.*.url:` looks at).
+  Future<List<String>> remoteUrls(String path) async {
+    final result = await _run([
+      'config',
+      '--get-regexp',
+      r'^remote\..*\.url$',
+    ], workingDir: path);
+    if (result.exitCode != 0) return const [];
+    return [
+      for (final line in LineSplitter.split(result.stdout as String))
+        if (line.trim().contains(' '))
+          line.trim().substring(line.trim().indexOf(' ') + 1).trim(),
+    ];
+  }
+
+  /// The rule that decides the profile for the project at [path],
+  /// looking at its remotes too so account rules apply.
+  Future<RepoRule?> ruleFor(String path, List<RepoRule> rules) async {
+    final urls = rules.any((r) => r.isAccountRule)
+        ? await remoteUrls(path)
+        : const <String>[];
+    return RepoRule.bestMatchFor(path, rules, remoteUrls: urls);
   }
 
   Future<List<String>> listRemotes(String path) async {

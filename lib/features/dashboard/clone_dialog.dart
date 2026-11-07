@@ -47,7 +47,12 @@ class _CloneDialogState extends ConsumerState<CloneDialog> {
 
   Future<void> _urlChanged(List<Profile> profiles) async {
     if (!_profilePicked) {
-      final suggested = CloneService.suggestProfile(_url.text, profiles);
+      final rules = await ref.read(repoRulesProvider.future);
+      final suggested = CloneService.suggestProfile(
+        _url.text,
+        profiles,
+        rules: rules,
+      );
       if (suggested != null) await _setProfile(suggested, picked: false);
     }
     setState(() => _error = null);

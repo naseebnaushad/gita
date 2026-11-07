@@ -40,9 +40,14 @@ push where the effective identity doesn't match what's expected for that repo.
   Manager/libsecret, never in a plain file) per identity.
 - **SSH keys** — one key per profile, made and added to the GitHub account
   by Gita, so `git@github.com:` pushes also use the right account.
-- **Rules** — map a folder to a profile; Gita writes a managed `includeIf`
-  block into `~/.gitconfig` so Git resolves the right identity per repo
-  automatically.
+- **Rules** — map a folder, or a GitHub organization, to a profile; Gita
+  writes a managed `includeIf` block into `~/.gitconfig` so Git resolves
+  the right identity per repo automatically. An organization rule
+  ("projects from github.com/acme use Work") applies wherever the project
+  is on the computer.
+- **Company setup** — a company shares one small file listing its GitHub
+  organizations and email domain; importing it (`gita company import`, or
+  **Import company setup** on the Rules screen) sets everything up.
 - **Dashboard** — lists tracked repos with their assigned profile, effective
   email, remote, and a mismatch badge. When Gita can fix a problem itself,
   a wrench button sits next to the badge: it adds a missing safety check,
@@ -82,6 +87,8 @@ gita check [folder]    # same, but exits 1 if it would commit/push as the wrong 
 gita doctor            # find setup problems before they break a commit or push
 gita profiles          # list profiles: email, GitHub account, sign-in, SSH key, folders
 gita sign-in --profile <name>   # sign a profile in to GitHub (shows a code to enter)
+gita company import <file> [--profile <name>]   # use the company's setup file
+gita company list      # company setups on this computer
 gita guard install [folder]   # add the safety check to a project (the app does this for you)
 gita guard remove [folder]    # take it out again
 gita guard status [folder]    # is it in place?
@@ -128,8 +135,9 @@ A clone is the one moment no folder rule can help yet: the project isn't
 on the computer, so git would use whatever account it finds first.
 `gita clone` (and **Clone a project** in the app) avoids that:
 
-1. **Which account.** `--profile` if given; otherwise the profile whose
-   GitHub account matches the owner in the address (`github.com/acme/...`
+1. **Which account.** `--profile` if given; otherwise the profile of an
+   organization rule for the owner in the address; otherwise the profile
+   whose GitHub account matches that owner (`github.com/acme/...`
    -> the profile signed in as `acme`); otherwise the profile of the
    folder rule covering the destination. If none fits, it asks for
    `--profile` instead of guessing.
@@ -148,6 +156,49 @@ on the computer, so git would use whatever account it finds first.
 gita clone https://github.com/acme/api.git                 # account worked out from "acme"
 gita clone git@github.com:acme/api.git ~/work/api --profile Work
 ```
+
+### Organization rules and company setup
+
+Folder rules depend on where a project sits. When a company's work lives
+in a few GitHub organizations, it's simpler to say "projects from
+`github.com/acme` use Work", and that works wherever the project is on
+the computer. On the Rules screen, choose **New rule** -> **A GitHub
+organization** and type the name, or paste any project address from it.
+
+Gita writes these as `hasconfig:remote.*.url:` includes, so plain `git`
+follows them too. They cover HTTPS addresses (with or without a user name)
+and both SSH forms (`git@github.com:acme/...` and `ssh://...`, with or
+without a port), in any letter case. The order, from weakest to strongest,
+is: folder rules, then organization rules, then rules for single
+projects. So a work project inside a personal folder still gets Work.
+
+**For whoever looks after the company's machines:** write one file and
+send it to everyone:
+
+```json
+{
+  "name": "Acme",
+  "emailDomains": ["acme.com"],
+  "github": { "owners": ["acme", "acme-labs"] }
+}
+```
+
+(`"github": {"host": "github.example.com", ...}` for GitHub Enterprise.)
+Each developer then runs `gita company import acme.json` or clicks
+**Import company setup** on the Rules screen. Gita picks the profile with
+an `@acme.com` email (or asks, with `--profile`), adds an organization
+rule for each owner, and keeps a copy in `~/.gita/company.json`. Running
+it again only changes what is different.
+
+After that, Doctor warns when:
+
+- a project from those organizations would commit with a non-company
+  email (a problem: the company may reject those commits);
+- an organization in the file has no rule;
+- no profile has a company email yet.
+
+The first two have a one-click fix in the app; for the last, add a
+profile with the company email first.
 
 ### The safety check: wrong-account commits and pushes are stopped
 

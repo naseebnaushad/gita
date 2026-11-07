@@ -21,31 +21,41 @@ enum DoctorFix {
 
   /// Put the `gita` command in place again.
   installCli,
+
+  /// Make a company organization's projects use the company profile.
+  useCompanyProfile,
 }
 
 extension DoctorFixText on DoctorFix {
   String get label => switch (this) {
-        DoctorFix.turnOffSigning => 'Turn off signing',
-        DoctorFix.unlinkSshKey => 'Stop using this key',
-        DoctorFix.setUpSshKey => 'Set up a new key',
-        DoctorFix.deleteRule => 'Delete this rule',
-        DoctorFix.signIn => 'Sign in with GitHub',
-        DoctorFix.installCli => 'Install it now',
-      };
+    DoctorFix.turnOffSigning => 'Turn off signing',
+    DoctorFix.unlinkSshKey => 'Stop using this key',
+    DoctorFix.setUpSshKey => 'Set up a new key',
+    DoctorFix.deleteRule => 'Delete this rule',
+    DoctorFix.signIn => 'Sign in with GitHub',
+    DoctorFix.installCli => 'Install it now',
+    DoctorFix.useCompanyProfile => 'Use the work profile',
+  };
 }
 
 /// The fixes Doctor offers for [issue], the recommended one first. Empty
 /// when the person has to sort it out outside Gita.
 List<DoctorFix> fixesFor(DoctorIssue issue) => switch (issue.category) {
-      DoctorCategory.gpgNotInstalled => const [DoctorFix.turnOffSigning],
-      DoctorCategory.missingSigningKey => const [DoctorFix.turnOffSigning],
-      DoctorCategory.missingSshKeyFile => const [DoctorFix.setUpSshKey, DoctorFix.unlinkSshKey],
-      DoctorCategory.orphanedSshKeyReference => const [DoctorFix.unlinkSshKey],
-      DoctorCategory.orphanedRuleProfile => const [DoctorFix.deleteRule],
-      DoctorCategory.missingPushToken => const [DoctorFix.signIn],
-      DoctorCategory.credentialHelperNotInstalled => const [DoctorFix.installCli],
-      DoctorCategory.keychainUnavailable => const [],
-    };
+  DoctorCategory.gpgNotInstalled => const [DoctorFix.turnOffSigning],
+  DoctorCategory.missingSigningKey => const [DoctorFix.turnOffSigning],
+  DoctorCategory.missingSshKeyFile => const [
+    DoctorFix.setUpSshKey,
+    DoctorFix.unlinkSshKey,
+  ],
+  DoctorCategory.orphanedSshKeyReference => const [DoctorFix.unlinkSshKey],
+  DoctorCategory.orphanedRuleProfile => const [DoctorFix.deleteRule],
+  DoctorCategory.missingPushToken => const [DoctorFix.signIn],
+  DoctorCategory.credentialHelperNotInstalled => const [DoctorFix.installCli],
+  DoctorCategory.keychainUnavailable => const [],
+  DoctorCategory.companyNoProfile => const [],
+  DoctorCategory.companyEmailMismatch || DoctorCategory.companyOwnerUnmapped =>
+    issue.profileId == null ? const [] : const [DoctorFix.useCompanyProfile],
+};
 
 /// A one-click repair the Dashboard can offer for one project.
 enum RepoFix {
