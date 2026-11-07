@@ -9,7 +9,7 @@ root=$(mktemp -d); trap 'rm -rf "$root"' EXIT
 "$here/stage.sh" "$bundle" "$root"
 
 common=(-s dir -n gita -v "$version" --iteration 1 -a amd64
-  --license Unspecified --url https://github.com/naseebnaushad/gita
+  --license MIT --url https://github.com/naseebnaushad/gita
   --maintainer "naseebnaushad <naseebnaushad46@gmail.com>"
   --description "Keeps each git project on the right GitHub account.")
 case "$fmt" in

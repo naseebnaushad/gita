@@ -493,3 +493,7 @@ there automatically the first time the app reads them.
 Gita stores its own state (profiles, rules, tracked repos) as flat JSON under
 `~/.gita/`, plus one generated `.gitconfig` fragment per profile. It never
 hand-edits your `~/.gitconfig` outside a clearly delimited managed block.
+
+## License
+
+[MIT](LICENSE) © 2026 naseebnaushad
