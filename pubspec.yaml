@@ -49,6 +49,9 @@ dependencies:
 
   # Secure storage (Keychain/Credential Manager/libsecret) for Git PATs (see plan §2)
   flutter_secure_storage: ^9.2.2
+
+  # Argument parsing for the headless `gita` CLI (bin/gita.dart)
+  args: ^2.6.0
   google_fonts: ^8.2.1
 
 dev_dependencies:

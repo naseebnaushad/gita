@@ -49,6 +49,31 @@ Run the test suite with:
 flutter test
 ```
 
+## Command line
+
+Gita also ships a small `gita` command for git hooks, scripts and AI
+coding agents, which can't use the desktop app. It reads the same profiles
+and rules the app saves.
+
+```
+gita which [folder]    # which account should this project use, and which is it using?
+gita check [folder]    # same, but exits 1 if it would commit/push as the wrong account
+gita doctor            # find setup problems before they break a commit or push
+```
+
+Add `--json` to any command for machine-readable output. Exit codes:
+`0` all good, `1` problem found, `2` couldn't run (bad arguments, or not a
+git project).
+
+Build it with:
+
+```
+dart build cli          # -> build/cli/<platform>/bundle/bin/gita(.exe)
+```
+
+(`dart compile exe` doesn't work here because some Flutter plugin
+dependencies use native build hooks; `dart build cli` handles them.)
+
 Gita stores its own state (profiles, rules, tracked repos) as flat JSON under
 `~/.gita/`, plus one generated `.gitconfig` fragment per profile. It never
 hand-edits your `~/.gitconfig` outside a clearly delimited managed block.
