@@ -116,6 +116,42 @@ New-Item -ItemType Directory -Force ~/.gita/bin; Copy-Item build/cli/windows_x64
 Then open the profile in Gita and press Save again so it writes the
 credential settings.
 
+### Sign in with GitHub
+
+Instead of creating and pasting a token, people can press **Sign in with
+GitHub** in a profile. Gita shows a short code, copies it, and opens
+github.com/login/device; they paste the code, press Authorize, and Gita
+saves the resulting token for that profile and shows which account it is
+(`Signed in as @name`). New profiles also get their name and email filled
+in from the GitHub account.
+
+The token asks for `repo` (push to private repos), `workflow` (push
+changes to `.github/workflows`), and `read:user` and `user:email` (to show
+the account and fill in the email).
+
+The button only appears when Gita knows a GitHub OAuth app client ID.
+Whoever manages Gita sets that up once:
+
+1. On GitHub, open **Settings → Developer settings → OAuth Apps → New
+   OAuth App** (for a company, create it under the organization's
+   settings).
+2. Name it `Gita`. Homepage URL: this repository. Callback URL: the same
+   (device flow doesn't use it, but GitHub requires one).
+3. Tick **Enable Device Flow** and register the app. No client secret is
+   needed.
+4. Copy the **Client ID** and build Gita with it:
+
+   ```
+   flutter build windows --dart-define=GITA_GITHUB_CLIENT_ID=<client id>
+   ```
+
+   or, without rebuilding, set the `GITA_GITHUB_CLIENT_ID` environment
+   variable before starting Gita.
+
+If the organization restricts OAuth app access, an owner approves Gita
+once under **Organization settings → Third-party access**; until then
+pushes to that organization's private repos are refused.
+
 Tokens live in Windows Credential Manager, the macOS login Keychain, or
 libsecret on Linux (which needs `secret-tool`, from the `libsecret-tools`
 package), filed under `gita`. Tokens saved by earlier versions of Gita move
