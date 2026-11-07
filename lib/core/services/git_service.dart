@@ -10,8 +10,7 @@ class GitService {
   /// machine's global/system gitconfig (e.g. by pointing GIT_CONFIG_GLOBAL
   /// and GIT_CONFIG_SYSTEM at empty files) without affecting production
   /// behavior, where inheriting the real environment is exactly what we want.
-  const GitService({Map<String, String>? environmentOverride})
-      : _environmentOverride = environmentOverride;
+  const GitService({this._environmentOverride});
 
   final Map<String, String>? _environmentOverride;
 

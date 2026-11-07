@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -65,6 +66,7 @@ void main() {
     List<String> args, {
     FakeGitHub? github,
     String stdin = '',
+    Future<void> Function(Duration)? delay,
   }) =>
       GitaCli(
         out: out,
@@ -79,7 +81,7 @@ void main() {
         deviceFlow: GitHubDeviceFlow(
           clientId: 'Ov23liTEST',
           http: github ?? signedInGitHub(),
-          delay: (_) async {},
+          delay: delay ?? (_) async {},
         ),
         openBrowser: (url) async {
           opened.add(url);
@@ -284,6 +286,69 @@ void main() {
       File(paths.profilesJsonPath).deleteSync();
       expect(await run(['profiles']), 0);
       expect(out.toString(), contains('No profiles yet'));
+    });
+  });
+
+  group('gita sign-in --no-wait (for AI tools)', () {
+    Future<Map<String, dynamic>> profileRow(String id) async {
+      out.clear();
+      expect(await run(['profiles', '--json']), 0);
+      final rows = (jsonDecode(out.toString())['profiles'] as List).cast<Map<String, dynamic>>();
+      return rows.firstWhere((r) => r['id'] == id);
+    }
+
+    Future<void> until(Future<bool> Function() done) async {
+      for (var i = 0; i < 200 && !await done(); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      expect(await done(), isTrue);
+    }
+
+    test('returns the code at once and finishes the sign-in by itself', () async {
+      final gate = Completer<void>();
+      final code = await run(
+        ['sign-in', '--profile', 'Work', '--no-wait', '--json'],
+        delay: (_) => gate.future,
+      );
+      expect(code, 0, reason: '$out$err');
+      final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+      expect(json['ok'], isTrue);
+      expect(json['step'], 'enter-code');
+      expect(json['code'], 'WDJB-MJHT');
+      expect(json['url'], 'https://github.com/login/device');
+      expect(json['profile'], 'work');
+      expect(json['browserOpened'], isTrue);
+      expect(json['message'], contains('WDJB-MJHT'));
+      expect(json.toString(), isNot(contains('gho_')), reason: 'no token is ever printed');
+      expect(opened, [Uri.parse('https://github.com/login/device')]);
+
+      // Still waiting for the person.
+      expect(await tokens.hasToken('work'), isFalse);
+      final waiting = await profileRow('work');
+      expect(waiting['signedIn'], isFalse);
+      expect(waiting['signInWaiting'], isTrue);
+
+      gate.complete();
+      await until(() => tokens.hasToken('work'));
+      await until(() async => (await profileRow('work'))['githubLogin'] == 'dev-work');
+      final done = await profileRow('work');
+      expect(done['signedIn'], isTrue);
+      expect(done.containsKey('signInWaiting'), isFalse);
+      expect(includeFile('work'), contains('credential --profile work'));
+    });
+
+    test('a refused sign-in shows up in gita profiles', () async {
+      final github = signedInGitHub(tokenAnswers: [
+        {'error': 'access_denied'},
+      ]);
+      expect(await run(['sign-in', '--profile', 'personal', '--no-wait', '--json', '--no-browser'], github: github), 0);
+      expect(opened, isEmpty);
+      expect(jsonDecode(out.toString())['browserOpened'], isFalse);
+      await until(() async => (await profileRow('personal')).containsKey('signInError'));
+      final row = await profileRow('personal');
+      expect(row['signedIn'], isFalse);
+      expect(row['signInError'], isNotEmpty);
+      expect(await tokens.hasToken('personal'), isFalse);
     });
   });
 }

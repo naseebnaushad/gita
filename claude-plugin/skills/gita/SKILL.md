@@ -1,6 +1,6 @@
 ---
 name: gita
-description: Use before any git commit, push or clone, and when the user asks which GitHub account, email or profile a project uses, or a commit or push was rejected for the wrong account or email. Gita keeps each project on the right GitHub account (for example personal and work).
+description: Use before any git commit, push or clone, and when the user asks which GitHub account, email or profile a project uses, or a commit or push was rejected for the wrong account or email, or asks to set up or change Gita (profiles, GitHub sign-in, which account a folder or organization uses). Gita keeps each project on the right GitHub account (for example personal and work).
 ---
 
 # Gita: the right GitHub account for each project
@@ -40,8 +40,53 @@ profile (see `gita_profiles`) and call it again with `profile`.
 - Push rejected, permission denied, or commits showing the wrong person
   → `gita_which`, then `gita_doctor`, and explain what they say.
 - "What accounts do I have?" → `gita_profiles`.
-- Setting Gita up for the first time → `gita_scan` shows suggestions
-  (it changes nothing); the user finishes setup in the Gita app.
+- Doctor found something → `gita_doctor` with `fix: true` fixes what
+  needs no person (after you tell the user what it will change).
+
+## Setting Gita up or changing it
+
+Only when the user asks (for example "set up Gita", "make my acme
+projects use my work account"). Before each tool that changes something,
+say in one sentence what it will change.
+
+1. `gita_scan` (changes nothing) shows the accounts the user's projects
+   commit with. Tell the user which folders it looked in (they may keep
+   projects somewhere else; pass `folders` then), and ask which accounts
+   to set up.
+2. `gita_setup` with `only` set to the emails they chose. For an account
+   no project uses yet, `gita_profile_add`. Setup names each new profile
+   after its email (for example "Acme" for `@acme.com`), so then use
+   `gita_profile_edit` to give it the name the user knows it by (such as
+   "Work") and its GitHub account name, if they told you it.
+3. If their company gave them a Gita setup file, `gita_company_import`
+   with the file's full path. If you don't know where it is, ask.
+4. For each profile in `needSignIn` (ids; the setup result's `profiles`
+   gives their names), `gita_sign_in`. It returns a code and a page: tell
+   the user to open the page, sign in **as that account**, and enter the
+   code. Gita finishes by itself; `gita_profiles` shows `signedIn: true`
+   once it has. While a sign-in is running it also shows
+   `signInWaiting`, and `signInError` if it failed (say what it says,
+   and offer to try again). Sign profiles in one at a time, so the user
+   doesn't mix the accounts up. If sign-in can't be done now, finish the
+   other steps and tell the user it's still to do.
+5. `gita_doctor` with `fix: true`, then explain anything left. Until a
+   profile is signed in, the doctor warns it has no GitHub sign-in:
+   that's expected, and the fix is step 4, not a token.
+6. `gita_check` each project, then sum up for the user in plain words:
+   each profile, the folders and organizations that use it, and what's
+   still to do.
+
+When a project matches more than one rule, the strongest wins: a rule
+for one project beats an organization rule (`owner`), which beats a
+folder rule.
+
+To change which account a folder or a GitHub organization uses:
+`gita_rules`, then `gita_rule_add` (it replaces an existing rule) or
+`gita_rule_remove`. To rename a profile or change its email or GitHub
+account: `gita_profile_edit`. To add or check the safety check in one
+project: `gita_guard`. Never ask the user for a password or token.
+Removing a profile isn't possible from here; tell the user to do it in
+the app.
 
 ## If the gita tools are missing or fail to start
 

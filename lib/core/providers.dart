@@ -1,7 +1,5 @@
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import 'models/doctor_issue.dart';
@@ -26,9 +24,12 @@ import 'services/machine_scanner.dart';
 import 'services/mismatch_detector.dart';
 import 'services/platform_paths.dart';
 import 'services/secure_token_service.dart';
+import 'services/setup_service.dart';
 import 'services/ssh_config_service.dart';
 import 'services/ssh_key_service.dart';
 import 'storage/repositories.dart';
+
+export 'services/setup_service.dart' show SetupResult;
 
 final platformPathsProvider = Provider((ref) => const PlatformPaths());
 
@@ -452,118 +453,42 @@ class CompanyActions {
   }
 }
 
-/// What [SetupActions.apply] made.
-class SetupResult {
-  const SetupResult({
-    required this.profiles,
-    required this.newProfiles,
-    required this.rules,
-    required this.sshKeys,
-    required this.projects,
-    this.projectProblems = const [],
-  });
-
-  /// Every profile the choices map to, new or existing.
-  final List<Profile> profiles;
-  final int newProfiles;
-  final int rules;
-  final int sshKeys;
-  final int projects;
-
-  /// Projects whose safety check couldn't be added, and why.
-  final List<String> projectProblems;
-}
-
-/// Saves what the setup wizard (or `gita scan`) suggested and the person
-/// kept.
+/// Saves what the setup wizard suggested and the person kept, then
+/// refreshes the screens that show it. The work is in [SetupService],
+/// which `gita setup` shares.
 class SetupActions {
   SetupActions(this._ref);
 
   final Ref _ref;
 
-  static const _doneMarker = 'first_run_done';
-
-  File _marker() => File(p.join(_ref.read(platformPathsProvider).gitaDir, _doneMarker));
+  SetupService get _service => SetupService(
+        paths: _ref.read(platformPathsProvider),
+        hasToken: _ref.read(secureTokenServiceProvider).hasToken,
+        git: _ref.read(gitServiceProvider),
+      );
 
   /// Whether to open the setup wizard by itself: no profiles yet and the
   /// person hasn't finished or skipped it before.
-  Future<bool> shouldOfferSetup() async {
-    if (_marker().existsSync()) return false;
-    return (await _ref.read(profileRepositoryProvider).getAll()).isEmpty;
-  }
+  Future<bool> shouldOfferSetup() => _service.shouldOfferSetup();
 
   /// Remembers that the wizard was finished or skipped, so it doesn't open
   /// by itself again (it's still under Profiles).
-  Future<void> markSetupDone() async {
-    final marker = _marker();
-    await marker.parent.create(recursive: true);
-    await marker.writeAsString(DateTime.now().toIso8601String());
-  }
+  Future<void> markSetupDone() => _service.markSetupDone();
 
   Future<SetupResult> apply(
     List<SetupChoice> choices, {
     required List<int> palette,
     bool trackProjects = true,
   }) async {
-    final profileRepo = _ref.read(profileRepositoryProvider);
-    final ruleRepo = _ref.read(repoRuleRepositoryProvider);
-    final keyRepo = _ref.read(sshKeyRepositoryProvider);
-    final existingProfiles = await profileRepo.getAll();
-    const uuid = Uuid();
-    final plan = SetupPlan.build(
-      choices: choices,
-      existingKeys: await keyRepo.getAll(),
-      existingRules: await ruleRepo.getAll(),
-      existingProfiles: existingProfiles,
-      palette: palette,
-      newId: uuid.v4,
-    );
-    for (final key in plan.sshKeys) {
-      await keyRepo.upsert(key);
+    try {
+      return await _service.apply(choices, palette: palette, trackProjects: trackProjects);
+    } finally {
+      _ref
+        ..invalidate(sshKeysProvider)
+        ..invalidate(profilesProvider)
+        ..invalidate(repoRulesProvider)
+        ..invalidate(trackedReposProvider)
+        ..invalidate(doctorIssuesProvider);
     }
-    for (final profile in plan.profiles) {
-      await profileRepo.upsert(profile);
-    }
-    for (final rule in plan.rules) {
-      await ruleRepo.upsert(rule);
-    }
-    _ref
-      ..invalidate(sshKeysProvider)
-      ..invalidate(profilesProvider)
-      ..invalidate(repoRulesProvider);
-    await syncGitConfig(
-      paths: _ref.read(platformPathsProvider),
-      hasToken: _ref.read(secureTokenServiceProvider).hasToken,
-    );
-
-    var tracked = 0;
-    final problems = <String>[];
-    if (trackProjects && plan.projects.isNotEmpty) {
-      final hooks = _ref.read(hookServiceProvider);
-      final trackedRepo = _ref.read(trackedRepoRepositoryProvider);
-      for (final path in plan.projects) {
-        final guard = await hooks.install(path);
-        await trackedRepo.upsert(TrackedRepo(
-          path: path,
-          lastScanned: DateTime.now(),
-          hookInstalled: guard.ok,
-        ));
-        tracked++;
-        if (!guard.ok) problems.add('$path: ${guard.message ?? 'safety check not added'}');
-      }
-      _ref.invalidate(trackedReposProvider);
-    }
-    _ref.invalidate(doctorIssuesProvider);
-    await markSetupDone();
-
-    final existingIds = {for (final pr in existingProfiles) pr.id};
-    return SetupResult(
-      profiles: plan.profiles,
-      newProfiles: plan.profiles.where((pr) => !existingIds.contains(pr.id)).length,
-      rules: plan.rules.length,
-      sshKeys: plan.sshKeys.length,
-      projects: tracked,
-      projectProblems: problems,
-    );
   }
 }

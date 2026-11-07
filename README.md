@@ -100,10 +100,18 @@ and rules the app saves.
 
 ```
 gita scan [folder...]  # suggest profiles from the projects on this computer (changes nothing)
+gita setup [folder...] [--only <email>]...   # set up what scan suggests (like "Set these up" in the app)
+gita profile add --name <name> --email <email> [--label <label>] [--folder <folder>]...
+gita profile edit <name> [--name ...] [--email ...] [--label ...] [--github-login ...]
+gita rule list         # which folders and GitHub organizations use which profile
+gita rule add --profile <name> --folder <folder>   # projects in this folder use this profile
+gita rule add --profile <name> --owner <org>       # projects from this GitHub account/org use it, wherever they are
+gita rule remove <rule id, folder or org>
 gita clone <address> [folder] [--profile <name>]   # download a project with the right account
 gita which [folder]    # which account should this project use, and which is it using?
 gita check [folder]    # same, but exits 1 if it would commit/push as the wrong account
 gita doctor            # find setup problems before they break a commit or push
+gita doctor --fix      # ...and fix the ones that need no person (rules to deleted profiles, company orgs)
 gita profiles          # list profiles: email, GitHub account, sign-in, SSH key, folders
 gita sign-in --profile <name>   # sign a profile in to GitHub (shows a code to enter)
 gita company import <file> [--profile <name>]   # use the company's setup file
@@ -234,6 +242,26 @@ server that gives agents Gita's answers as tools:
 | `gita_doctor` | Setup problems and how to fix them. |
 | `gita_profiles` | The accounts on this computer. |
 | `gita_scan` | Suggest profiles from the projects on this computer (changes nothing). |
+| `gita_rules` | Which folders and GitHub organizations use which profile. |
+
+Agents can also **set Gita up and fix it** when you ask them to ("set up
+Gita for me", "make the acme projects use my work account"), so a whole
+setup can be automated:
+
+| Tool | What it does |
+| --- | --- |
+| `gita_setup` | Set up what `gita_scan` found: profiles, folder rules, SSH keys and the safety check. |
+| `gita_profile_add` / `gita_profile_edit` | Add or change a profile by hand. |
+| `gita_rule_add` / `gita_rule_remove` | Make a folder, or a GitHub organization's projects, use a profile. |
+| `gita_sign_in` | Sign a profile in to GitHub. It returns a code for **you** to enter on github.com; the agent never sees a password or token, and Gita finishes the sign-in by itself. |
+| `gita_company_import` | Use the company's setup file. |
+| `gita_guard` | Add, remove or check the safety check in a project. |
+| `gita_doctor` with `fix` | Fix the setup problems that need no person. |
+
+Each tool is marked as read-only or not, so Claude Code asks you before
+using one that changes something. Agents are told to say what a tool will
+change before they use it. Gita can't remove a profile from these tools;
+do that in the app.
 
 To connect **Claude Code**, open Gita once (it installs the `gita`
 command into `~/.gita/bin`), then run this once:

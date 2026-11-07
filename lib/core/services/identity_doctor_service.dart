@@ -218,8 +218,9 @@ class IdentityDoctorService {
           severity: Severity.warning,
           message: '"${profile.label}" has no GitHub sign-in saved. Pushes '
               'from its projects will use whichever GitHub account this '
-              'computer remembers, which may be the wrong one. Open '
-              'Profiles, edit "${profile.label}" and paste an access token.',
+              'computer remembers, which may be the wrong one. Sign it in: '
+              'open Profiles, edit "${profile.label}" and press "Sign in '
+              'with GitHub" (or paste an access token there).',
           profileId: profile.id,
         ));
       }
