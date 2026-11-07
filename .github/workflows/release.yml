@@ -26,6 +26,12 @@ jobs:
           tag="${GITHUB_REF_NAME#v}"
           pubspec=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)
           echo "tag=$tag pubspec=$pubspec"
+          cli=$(sed -n "s/.*static const version = '\([^']*\)'.*/\1/p" lib/cli/gita_cli.dart)
+          echo "cli=$cli"
+          if [ "$tag" != "$cli" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the gita command version $cli (lib/cli/gita_cli.dart)."
+            exit 1
+          fi
           if [ "$tag" != "$pubspec" ]; then
             echo "::error::Tag $GITHUB_REF_NAME doesn't match pubspec.yaml version $pubspec. Bump the version first."
             exit 1
