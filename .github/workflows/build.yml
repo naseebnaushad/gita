@@ -131,7 +131,24 @@ jobs:
         if: matrix.target == 'macos'
         run: |
           app="build/macos/Build/Products/Release/gita.app"
-          "$app/Contents/Resources/cli/bin/gita" --version
+          cli="$app/Contents/Resources/cli/bin/gita"
+          # A hardened-runtime Dart AOT binary signed without
+          # Cli.entitlements is SIGKILLed at launch (exit 137).
+          set +e
+          "$cli" --version
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            if [ "$status" -ge 128 ]; then
+              echo "::error::The bundled gita command was killed by signal $((status - 128)) (exit $status). Check its code signature and entitlements (macos/Runner/Cli.entitlements)."
+            else
+              echo "::error::The bundled gita command doesn't run (exit $status)."
+            fi
+            codesign -d --entitlements - "$cli" || true
+            exit 1
+          fi
+          codesign -d --entitlements - "$cli" 2>&1 | grep -q allow-unsigned-executable-memory \
+            || { echo "::error::The bundled gita command is missing the allow-unsigned-executable-memory entitlement."; exit 1; }
           codesign --verify --deep --strict "$app"
           scripts/smoke_cli.sh "$app/Contents/Resources/cli/bin/gita"
           mkdir -p dist

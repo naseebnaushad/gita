@@ -29,7 +29,17 @@ cp -R "$OUT/bundle/" "$DEST/"
 
 # Code inside the app must be signed with the app's identity (or ad hoc
 # for local builds), or macOS refuses to run it / notarization fails.
+# The executables also need Cli.entitlements: a Dart AOT binary under the
+# hardened runtime is SIGKILLed at launch on current macOS without
+# allow-unsigned-executable-memory. Dylibs take no entitlements.
 IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+ENTITLEMENTS="$PROJECT_DIR/Runner/Cli.entitlements"
 find "$DEST" -type f \( -perm -u+x -o -name '*.dylib' \) | while read -r f; do
-  codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$f"
+  case "$f" in
+    *.dylib)
+      codesign --force --options runtime --timestamp=none --sign "$IDENTITY" "$f" ;;
+    *)
+      codesign --force --options runtime --timestamp=none --sign "$IDENTITY" \
+        --entitlements "$ENTITLEMENTS" "$f" ;;
+  esac
 done
