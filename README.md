@@ -304,6 +304,12 @@ The macOS build is signed ad hoc (fine for trying it; macOS asks to
 confirm on first open: right-click -> **Open**). To hand it to many
 people, sign and notarize it with an Apple Developer ID.
 
+The app itself is universal (Apple silicon and Intel), but the bundled
+`gita` command is built by `dart build cli`, which only builds for the
+machine it runs on. The release is built on an Apple silicon runner, so on
+Intel Macs the app opens but the `gita` command (credential helper, MCP
+server) doesn't run.
+
 ### The safety check: wrong-account commits and pushes are stopped
 
 When you add a project on the Dashboard, Gita puts a small safety check
