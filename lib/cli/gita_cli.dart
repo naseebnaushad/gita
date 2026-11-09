@@ -30,6 +30,7 @@ import '../core/services/token_store.dart';
 import '../core/storage/repositories.dart';
 import 'mcp_server.dart';
 
+part 'gh_command.dart';
 part 'manage_commands.dart';
 
 /// Exit codes shared by every command, so hooks and agent integrations can
@@ -71,8 +72,12 @@ class GitaCli {
     this.deviceFlow,
     Future<bool> Function(Uri url)? openBrowser,
     ProcessRunner? runProcess,
+    InteractiveRunner? runInteractive,
+    Map<String, String>? environment,
     PathSetup? pathSetup,
   })  : runProcess = runProcess ?? _defaultRunProcess,
+        runInteractive = runInteractive ?? _defaultRunInteractive,
+        environment = environment ?? Platform.environment,
         pathSetup = pathSetup ?? PathSetup(paths: paths),
         tokenStore = tokenStore ?? TokenStore(),
         openBrowser = openBrowser ?? defaultOpenBrowser {
@@ -105,6 +110,13 @@ class GitaCli {
 
   /// Runs other programs (`gita mcp add-to-claude` runs `claude`).
   final ProcessRunner runProcess;
+
+  /// Runs `gh` for `gita gh`, attached to the terminal.
+  final InteractiveRunner runInteractive;
+
+  /// Environment `gita gh` starts `gh` with (plus `GH_TOKEN`) and searches
+  /// PATH in. Defaults to Gita's own.
+  final Map<String, String> environment;
 
   static Future<ProcessResult> _defaultRunProcess(String executable, List<String> arguments) =>
       Process.run(executable, arguments, runInShell: Platform.isWindows);
@@ -182,6 +194,11 @@ class GitaCli {
   }
 
   Future<int> run(List<String> arguments) async {
+    // Before parsing: everything after `gh` belongs to the GitHub CLI,
+    // including its own --json and --help.
+    if (arguments.isNotEmpty && arguments.first == 'gh') {
+      return _gh(arguments.sublist(1));
+    }
     final parser = _buildParser();
     final ArgResults results;
     try {
@@ -335,6 +352,13 @@ Commands:
                    github.com), so HTTPS pushes use that account.
                    --with-token reads a token from stdin instead;
                    --no-browser doesn't open the browser.
+  gh [--profile <name or id>] <gh command...>
+                   Run the GitHub CLI (gh) as the account this project
+                   belongs to, for example: gita gh pr create --fill
+                   Gita gives gh that profile's GitHub sign-in for this
+                   one command; gh's own login isn't used or changed.
+                   Everything after "gh" goes to gh, including --json.
+                   Exit code is gh's.
 
 [folder] defaults to the current folder.
 

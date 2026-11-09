@@ -1,6 +1,6 @@
 ---
 name: gita
-description: Use before any git commit, push or clone, and when the user asks which GitHub account, email or profile a project uses, or a commit or push was rejected for the wrong account or email, or asks to set up or change Gita (profiles, GitHub sign-in, which account a folder or organization uses). Gita keeps each project on the right GitHub account (for example personal and work).
+description: Use before any git commit, push or clone, before running the GitHub CLI (gh), and when the user asks which GitHub account, email or profile a project uses, or a commit or push was rejected for the wrong account or email, or asks to set up or change Gita (profiles, GitHub sign-in, which account a folder or organization uses). Gita keeps each project on the right GitHub account (for example personal and work).
 ---
 
 # Gita: the right GitHub account for each project
@@ -33,6 +33,17 @@ Use `gita_clone` with the address instead of `git clone`. It picks the
 account, uses that account's sign-in or SSH key, and keeps the project on
 it. If it says it can't tell which account to use, ask the user which
 profile (see `gita_profiles`) and call it again with `profile`.
+
+## Using the GitHub CLI (`gh`)
+
+`gh` has one login for the whole computer, which may be a different
+account from the project's. In a project, run `gita gh <command>` instead
+of `gh <command>` (for example `gita gh pr create --fill`): Gita runs `gh`
+as the project's account. Everything after `gh` goes to `gh`, including
+`--json`. If it says it can't tell which account to use, ask the user
+which profile and run `gita gh --profile <name> <command>`. If it says the
+profile isn't signed in, use `gita_sign_in`. Don't run `gh auth login`,
+`gh auth switch` or `gh auth token` to get around it.
 
 ## When something about accounts is wrong
 
