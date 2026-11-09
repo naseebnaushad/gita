@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 (unreleased)
+## 1.1.0 (2026-11-09)
 
 - `gita onboard <file>`: set a new computer up from one onboarding file:
   tools (git, gh, Claude Code), clean-up of old GitHub sign-ins that use the
