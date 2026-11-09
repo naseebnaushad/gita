@@ -5,6 +5,7 @@ import 'package:gita/core/models/profile.dart';
 import 'package:gita/core/models/repo_rule.dart';
 import 'package:gita/core/providers.dart';
 import 'package:gita/core/services/clone_service.dart';
+import 'package:gita/core/services/github_device_flow.dart';
 import 'package:gita/core/services/keychain_store.dart';
 import 'package:gita/core/services/legacy_tokens.dart';
 import 'package:gita/core/services/platform_paths.dart';
@@ -12,6 +13,8 @@ import 'package:gita/core/services/secure_token_service.dart';
 import 'package:gita/core/services/token_store.dart';
 import 'package:gita/core/storage/repositories.dart';
 import 'package:gita/features/dashboard/clone_dialog.dart';
+
+import '../support/fake_github.dart';
 
 final _work = Profile(
   id: 'work',
@@ -63,6 +66,25 @@ class _Service extends CloneService {
       profile?.id == 'me' ? 'C:/code/me' : 'C:/code/work';
 }
 
+final signIns = <(String, String, String)>[];
+var cliInstalls = 0;
+
+class _Doctor extends DoctorActions {
+  _Doctor(super.ref);
+
+  @override
+  Future<String> saveSignIn(String profileId, {required String token, required String login}) async {
+    signIns.add((profileId, token, login));
+    return 'Signed in.';
+  }
+
+  @override
+  Future<String> installCli() async {
+    cliInstalls++;
+    return 'The gita command is installed.';
+  }
+}
+
 class _Actions extends CloneActions {
   _Actions(super.ref);
 
@@ -83,6 +105,8 @@ void main() {
   setUp(() {
     profiles = [_work, _me];
     cloned = null;
+    signIns.clear();
+    cliInstalls = 0;
     nextOutcome = const CloneOutcome(ok: true, path: 'C:/code/work/api', message: 'Cloned.');
   });
 
@@ -100,6 +124,17 @@ void main() {
         ),
         cloneServiceProvider.overrideWithValue(_Service()),
         cloneActionsProvider.overrideWith(_Actions.new),
+        doctorActionsProvider.overrideWith(_Doctor.new),
+        gitHubDeviceFlowProvider.overrideWithValue(GitHubDeviceFlow(
+          clientId: 'x',
+          http: FakeGitHub(
+            tokenAnswers: [
+              {'access_token': 'gho_new'},
+            ],
+            user: {'login': 'acme-dev', 'name': 'Dev'},
+          ),
+          delay: (_) async {},
+        )),
       ],
       child: MaterialApp(
         home: Scaffold(
@@ -195,5 +230,72 @@ void main() {
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(find.text('Clone a project'), findsNothing);
+  });
+
+  Future<void> failClone(WidgetTester tester, CloneOutcome outcome) async {
+    await open(tester);
+    await tester.enterText(find.byType(TextField), 'https://github.com/acme-dev/api.git');
+    await tester.pumpAndSettle();
+    nextOutcome = outcome;
+    await tester.tap(find.text('Clone'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a sign-in failure offers "Sign in with GitHub" right there', (tester) async {
+    await failClone(
+      tester,
+      const CloneOutcome(
+        ok: false,
+        path: 'x',
+        message: "GitHub didn't accept Work's saved sign-in.",
+        problem: CloneProblem.signIn,
+        gitDetail: "fatal: Authentication failed for 'https://github.com/acme-dev/api.git/'",
+      ),
+    );
+    expect(find.text("GitHub didn't accept Work's saved sign-in."), findsOneWidget);
+    expect(find.textContaining('git said: fatal: Authentication failed'), findsOneWidget);
+
+    await tester.tap(find.text('Sign in with GitHub'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use this account'));
+    await tester.pumpAndSettle();
+
+    expect(signIns, [('work', 'gho_new', 'acme-dev')]);
+    expect(find.text('Signed in as @acme-dev. Press Clone to try again.'), findsOneWidget);
+    expect(find.text("GitHub didn't accept Work's saved sign-in."), findsNothing);
+    expect(find.text('Clone a project'), findsOneWidget);
+
+    // Trying again clones.
+    nextOutcome = const CloneOutcome(ok: true, path: 'C:/code/work/api', message: 'Cloned.');
+    await tester.tap(find.text('Clone'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clone a project'), findsNothing);
+  });
+
+  testWidgets('a helper failure offers to reinstall the gita command, not a sign-in', (tester) async {
+    await failClone(
+      tester,
+      const CloneOutcome(
+        ok: false,
+        path: 'x',
+        message: "Work is signed in, but git didn't get the sign-in from Gita's helper.",
+        problem: CloneProblem.helper,
+      ),
+    );
+    expect(find.text('Sign in with GitHub'), findsNothing);
+
+    await tester.tap(find.text('Reinstall the gita command'));
+    await tester.pumpAndSettle();
+    expect(cliInstalls, 1);
+    expect(signIns, isEmpty);
+    expect(find.text('The gita command is installed. Press Clone to try again.'), findsOneWidget);
+  });
+
+  testWidgets('a failure with nothing to fix shows no button', (tester) async {
+    await failClone(tester, const CloneOutcome(ok: false, path: 'x', message: 'No internet.'));
+    expect(find.text('No internet.'), findsOneWidget);
+    expect(find.text('Sign in with GitHub'), findsNothing);
+    expect(find.text('Reinstall the gita command'), findsNothing);
+    expect(find.textContaining('git said'), findsNothing);
   });
 }

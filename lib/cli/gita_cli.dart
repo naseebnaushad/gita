@@ -766,6 +766,16 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       if (outcome.guardProblem != null) out.writeln('Safety check not added: ${outcome.guardProblem}');
     } else {
       err.writeln(outcome.message);
+      switch (outcome.problem) {
+        case CloneProblem.signIn:
+          err.writeln('To sign in: gita sign-in --profile "${profile.label}"');
+        case CloneProblem.helper:
+          err.writeln('To reinstall it: open the Gita app (it installs the gita command when '
+              'it starts), or run "gita doctor".');
+        case CloneProblem.sshKey || null:
+          break;
+      }
+      if (outcome.gitDetail != null) err.writeln('git said: ${outcome.gitDetail}');
     }
     return outcome.ok ? ExitCodes.ok : ExitCodes.problem;
   }
