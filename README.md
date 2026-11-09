@@ -114,6 +114,7 @@ gita doctor            # find setup problems before they break a commit or push
 gita doctor --fix      # ...and fix the ones that need no person (rules to deleted profiles, company orgs)
 gita profiles          # list profiles: email, GitHub account, sign-in, SSH key, folders
 gita sign-in --profile <name>   # sign a profile in to GitHub (shows a code to enter)
+gita gh [--profile <name>] <gh command...>   # run the GitHub CLI (gh) as this project's account
 gita company import <file> [--profile <name>]   # use the company's setup file
 gita company list      # company setups on this computer
 gita guard install [folder]   # add the safety check to a project (the app does this for you)
@@ -122,9 +123,10 @@ gita guard status [folder]    # is it in place?
 gita mcp add-to-claude        # let Claude Code ask Gita (see below)
 ```
 
-Add `--json` to any command for machine-readable output. Exit codes:
+Add `--json` to any command for machine-readable output (except
+`gita gh`, which passes `--json` on to `gh`). Exit codes:
 `0` all good, `1` problem found, `2` couldn't run (bad arguments, or not a
-git project).
+git project). `gita gh` exits with `gh`'s own code once `gh` has started.
 
 Build it with:
 
@@ -257,6 +259,10 @@ setup can be automated:
 | `gita_company_import` | Use the company's setup file. |
 | `gita_guard` | Add, remove or check the safety check in a project. |
 | `gita_doctor` with `fix` | Fix the setup problems that need no person. |
+
+For the GitHub CLI, agents are told to run `gita gh <command>` instead of
+`gh <command>` (see [the GitHub CLI section](#the-github-cli-gh-with-the-right-account)).
+There is deliberately no MCP tool that runs `gh` or hands out a token.
 
 Each tool is marked as read-only or not, so Claude Code asks you before
 using one that changes something. Agents are told to say what a tool will
@@ -408,6 +414,45 @@ If GitHub refuses the token, nothing is saved and the command says so. If
 the account's main email isn't the one the profile commits with, the
 command points that out, because GitHub then won't link the commits to the
 account unless that email is added to it.
+
+### The GitHub CLI (`gh`) with the right account
+
+`gh` remembers one login for the whole computer, so `gh pr create` in a
+personal project acts as your work account if that is who `gh` is signed
+in as. Prefix it with `gita`:
+
+```
+gita gh pr create --fill
+gita gh pr list --json number,title
+gita gh --profile Personal repo create my-thing --private
+```
+
+`gita gh` works out the project's profile the same way pushes do (folder
+rules, then GitHub account/organization rules matched against the
+project's remote), reads that profile's GitHub sign-in from the computer's
+password store, and runs `gh` with it in `GH_TOKEN`, for that one command
+only. `gh`'s own login is neither used nor changed, so there is nothing to
+`gh auth switch`. Everything after `gh` goes to `gh` unchanged, and the
+exit code is `gh`'s.
+
+- `--profile <name or id>` (before the `gh` command) picks the profile
+  yourself; you need it outside a git project.
+- If no rule covers the project, it stops (exit 2) and asks for
+  `--profile` rather than guessing.
+- If the profile isn't signed in, it says to run `gita sign-in --profile
+  <name>` (exit 1).
+- If `gh` isn't installed it says how to get it (https://cli.github.com).
+  You don't need to run `gh auth login`.
+- Gita never shows the sign-in: `gita gh auth token` and `gita gh auth
+  status --show-token` are refused. `gita gh auth status` shows which
+  account `gh` is using.
+- `GITHUB_TOKEN` from your shell is not passed to `gh`, so a token for
+  another account can't slip in.
+
+Only github.com is covered, like Gita's sign-in.
+
+To make plain `gh` always go through Gita, add an alias to your shell
+profile: `alias gh='gita gh'`.
 
 ### SSH pushes with the right account
 
