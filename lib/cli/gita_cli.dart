@@ -141,7 +141,7 @@ class GitaCli {
   static Future<ProcessResult> _defaultRunProcess(String executable, List<String> arguments) =>
       Process.run(executable, arguments, runInShell: Platform.isWindows);
 
-  static const version = '1.1.0';
+  static const version = '1.1.1';
 
   ArgParser _buildParser() {
     ArgParser command() => ArgParser()

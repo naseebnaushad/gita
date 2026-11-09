@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.1 (unreleased)
+## 1.1.1 (2026-11-09)
 
 - Windows: `gita onboard` started from PowerShell 7 could not install Claude
   Code ("Get-FileHash is not recognized"): Windows PowerShell inherited
