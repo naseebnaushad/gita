@@ -56,7 +56,12 @@ profile isn't signed in, use `gita_sign_in`. Don't run `gh auth login`,
 
 ## Setting Gita up or changing it
 
-Only when the user asks (for example "set up Gita", "make my acme
+If the user's company gave them an onboarding file, setting up a new
+computer is one command they run themselves in a terminal (it asks
+questions and opens GitHub sign-in): `gita onboard <file>`. Suggest
+`--dry-run` first if they want to see what it would change.
+
+Otherwise, only when the user asks (for example "set up Gita", "make my acme
 projects use my work account"). Before each tool that changes something,
 say in one sentence what it will change.
 

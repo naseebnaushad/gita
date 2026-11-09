@@ -10,6 +10,12 @@ import '../core/models/doctor_issue.dart';
 import '../core/models/mismatch_report.dart';
 import '../core/models/profile.dart';
 import '../core/models/repo_rule.dart';
+import '../core/onboarding/github_cleanup.dart';
+import '../core/onboarding/old_backups.dart';
+import '../core/onboarding/onboarding_file.dart';
+import '../core/onboarding/repo_step.dart';
+import '../core/onboarding/system.dart';
+import '../core/onboarding/tools.dart';
 import '../core/services/clone_service.dart';
 import '../core/services/company_setup.dart';
 import '../core/services/git_config_sync.dart';
@@ -32,6 +38,7 @@ import 'mcp_server.dart';
 
 part 'gh_command.dart';
 part 'manage_commands.dart';
+part 'onboard_command.dart';
 
 /// Exit codes shared by every command, so hooks and agent integrations can
 /// branch on them without parsing output.
@@ -74,10 +81,14 @@ class GitaCli {
     ProcessRunner? runProcess,
     InteractiveRunner? runInteractive,
     Map<String, String>? environment,
+    CommandRunner? commandRunner,
+    this.prompter,
+    this.hostOs,
     PathSetup? pathSetup,
   })  : runProcess = runProcess ?? _defaultRunProcess,
         runInteractive = runInteractive ?? _defaultRunInteractive,
         environment = environment ?? Platform.environment,
+        commandRunner = commandRunner ?? const SystemCommandRunner(),
         pathSetup = pathSetup ?? PathSetup(paths: paths),
         tokenStore = tokenStore ?? TokenStore(),
         openBrowser = openBrowser ?? defaultOpenBrowser {
@@ -117,6 +128,15 @@ class GitaCli {
   /// Environment `gita gh` starts `gh` with (plus `GH_TOKEN`) and searches
   /// PATH in. Defaults to Gita's own.
   final Map<String, String> environment;
+
+  /// Runs installers, git and setup scripts for `gita onboard`.
+  final CommandRunner commandRunner;
+
+  /// Asks the questions in `gita onboard`; null means the terminal.
+  final Prompter? prompter;
+
+  /// The system `gita onboard` sets up; null means this one.
+  final HostOs? hostOs;
 
   static Future<ProcessResult> _defaultRunProcess(String executable, List<String> arguments) =>
       Process.run(executable, arguments, runInShell: Platform.isWindows);
@@ -182,6 +202,17 @@ class GitaCli {
           ..addFlag('no-browser', negatable: false, help: "Don't open the browser.")
           // Used by `gita mcp`: print the code and finish in the background.
           ..addFlag('no-wait', negatable: false, hide: true),
+      )
+      ..addCommand(
+        'onboard',
+        command()
+          ..addFlag('dry-run', negatable: false, help: 'Show what would change; change nothing.')
+          ..addFlag('yes', negatable: false, help: 'Answer yes to every question.')
+          ..addFlag('clean', negatable: false, help: 'Remove old GitHub sign-ins without asking.')
+          ..addOption('name', help: 'Your name, shown on commits.')
+          ..addMultiOption('email', help: 'Your email for an account: <account id>=<email>.')
+          ..addFlag('skip-sign-in', negatable: false, help: 'Skip GitHub sign-in (testing).')
+          ..addFlag('skip-repos', negatable: false, help: 'Skip repositories and their files (testing).'),
       )
       ..addCommand('mcp', command())
       ..addCommand('hook', ArgParser(allowTrailingOptions: false))
@@ -270,6 +301,8 @@ class GitaCli {
         return _company(command, json: json);
       case 'mcp':
         return _mcp(command.rest, json: json);
+      case 'onboard':
+        return _onboardCommand(command);
     }
     return ExitCodes.usage;
   }
@@ -352,6 +385,13 @@ Commands:
                    github.com), so HTTPS pushes use that account.
                    --with-token reads a token from stdin instead;
                    --no-browser doesn't open the browser.
+  onboard <file> [--dry-run] [--yes] [--clean] [--name <name>]
+          [--email <account>=<email>]...
+                   Set this computer up from your company's onboarding
+                   file: tools (git, gh, Claude Code), clean-up of old
+                   GitHub sign-ins, a profile and sign-in per account,
+                   repositories and their setup, then "doctor". Safe to
+                   run again: finished steps are skipped.
   gh [--profile <name or id>] <gh command...>
                    Run the GitHub CLI (gh) as the account this project
                    belongs to, for example: gita gh pr create --fill

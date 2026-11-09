@@ -59,6 +59,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           ls -l dist
+          # Checksums for installers that download a release: they pin a
+          # version and its SHA-256, and a bot checks new releases against this.
+          (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
           flags=""
           case "$TAG" in *-*) flags="--prerelease" ;; esac
           gh release create "$TAG" dist/* \

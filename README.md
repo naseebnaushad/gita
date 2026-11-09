@@ -117,6 +117,8 @@ gita sign-in --profile <name>   # sign a profile in to GitHub (shows a code to e
 gita gh [--profile <name>] <gh command...>   # run the GitHub CLI (gh) as this project's account
 gita company import <file> [--profile <name>]   # use the company's setup file
 gita company list      # company setups on this computer
+gita onboard <file> [--dry-run] [--yes] [--clean] [--name <name>] [--email <account>=<email>]...
+                       # set a new computer up from the company's onboarding file (see docs/onboarding.md)
 gita guard install [folder]   # add the safety check to a project (the app does this for you)
 gita guard remove [folder]    # take it out again
 gita guard status [folder]    # is it in place?
@@ -511,8 +513,12 @@ in from the GitHub account.
 
 The token asks for `repo` (push to private repos), `workflow` (push
 changes to `.github/workflows`), `read:user` and `user:email` (to show
-the account and fill in the email), and `write:public_key` (to add the
-profile's SSH key to the account).
+the account and fill in the email), `write:public_key` (to add the
+profile's SSH key to the account), and `read:org` (so `gita gh` can run
+GitHub CLI commands that read organizations and teams). Profiles signed
+in before Gita asked for `read:org` keep working for git and most `gh`
+commands; if an organization or team command fails with a permissions
+error, sign the profile in again.
 
 Gita signs in through its own GitHub OAuth app, "Gita"
 (client ID `Ov23licOLgsWLhLzch9w`, built in, nothing to set up). On
