@@ -39,6 +39,15 @@ enum CommandIo {
   terminal,
 }
 
+/// Environment for starting Windows PowerShell (`powershell`, 5.1).
+///
+/// When Gita itself was started from PowerShell 7, PSModulePath points at
+/// PowerShell 7's modules, and Windows PowerShell started with it can't load
+/// its own built-in commands (for example "Get-FileHash is not recognized",
+/// which breaks the official Claude Code installer). Without the variable,
+/// Windows PowerShell builds its default module path.
+const windowsPowerShellEnvironment = <String, String?>{'PSModulePath': null};
+
 /// Runs other programs.
 abstract interface class CommandRunner {
   /// Runs [executable] with [arguments]. Never throws for a program that is

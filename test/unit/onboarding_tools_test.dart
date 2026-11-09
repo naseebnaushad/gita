@@ -5,11 +5,12 @@ import 'package:gita/core/onboarding/tools.dart';
 
 /// One recorded program run.
 class Call {
-  Call(this.executable, this.arguments, this.io, this.timeout);
+  Call(this.executable, this.arguments, this.io, this.timeout, [this.environment = const {}]);
   final String executable;
   final List<String> arguments;
   final CommandIo io;
   final Duration timeout;
+  final Map<String, String?> environment;
 
   String get line => [executable, ...arguments].join(' ');
 }
@@ -34,7 +35,7 @@ class FakeRunner implements CommandRunner {
     String? stdinText,
     Duration timeout = const Duration(minutes: 2),
   }) async {
-    final call = Call(executable, List.of(arguments), io, timeout);
+    final call = Call(executable, List.of(arguments), io, timeout, Map.of(environment));
     calls.add(call);
     final queue = _script[call.line];
     if (queue == null || queue.isEmpty) return const CommandResult(CommandResult.notFound);
@@ -206,6 +207,9 @@ void main() {
         'irm https://claude.ai/install.ps1 -TimeoutSec 300 | iex',
       ]);
       expect(install.io, CommandIo.show);
+      // Started from PowerShell 7, Windows PowerShell must not inherit its
+      // module path (the installer's Get-FileHash would be missing).
+      expect(install.environment, {'PSModulePath': null});
       expect(installer.commandFor('claude'), r'C:\Users\dev\.local\bin\claude.exe');
     });
   });

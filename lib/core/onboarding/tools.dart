@@ -315,7 +315,13 @@ class ToolInstaller {
         return _Unavailable("$name needs curl, and curl couldn't be installed.", (curl as _Ran).hint);
       }
     }
-    final r = await _runner.run(exe, args, io: CommandIo.show, timeout: installTimeout);
+    final r = await _runner.run(
+      exe,
+      args,
+      io: CommandIo.show,
+      timeout: installTimeout,
+      environment: os == HostOs.windows ? windowsPowerShellEnvironment : const {},
+    );
     return _Ran(
       r.exitCode,
       r.ok ? claudeSetupHint : 'Check your internet connection and the messages above, then run this again.',
