@@ -1,4 +1,6 @@
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -22,6 +24,7 @@ import 'services/hook_service.dart';
 import 'services/identity_doctor_service.dart';
 import 'services/machine_scanner.dart';
 import 'services/mismatch_detector.dart';
+import 'services/path_setup.dart';
 import 'services/platform_paths.dart';
 import 'services/secure_token_service.dart';
 import 'services/setup_service.dart';
@@ -82,6 +85,9 @@ final gitHubSshKeysProvider = Provider((ref) => GitHubSshKeys());
 final cliInstallerProvider =
     Provider((ref) => CliInstaller(paths: ref.watch(platformPathsProvider)));
 
+final pathSetupProvider =
+    Provider((ref) => PathSetup(paths: ref.watch(platformPathsProvider)));
+
 /// Puts the `gita` command this app ships in ~/.gita/bin (or updates it)
 /// and, when that changed anything, rewrites the profiles' git settings so
 /// profiles with a saved GitHub sign-in start using it. Read once at
@@ -96,6 +102,19 @@ Future<CliInstallResult> _installCli(Ref ref) async {
       await ref.read(profilesProvider.notifier).resyncGitConfig();
     }
     ref.invalidate(doctorIssuesProvider);
+  }
+  // The first time, put the command on PATH for new terminals (macOS and
+  // Linux; the Windows installer does this itself). Only an app that ships
+  // the command does this: not `flutter test`, where nothing is bundled.
+  final ships = result.status != CliInstallStatus.notBundled &&
+      result.status != CliInstallStatus.failed;
+  if (ships && File(ref.read(platformPathsProvider).cliPath).existsSync()) {
+    try {
+      final added = await ref.read(pathSetupProvider).addOnce();
+      if (added != null && !added.ok) debugPrint('Adding gita to PATH: ${added.error}');
+    } catch (e) {
+      debugPrint('Adding gita to PATH failed: $e');
+    }
   }
   return result;
 }
