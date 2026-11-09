@@ -4,7 +4,7 @@
 # the freshly built tarball, desktop file and icon next to this file; for
 # the AUR, run `updpkgsums` so the checksums are filled in.
 pkgname=gita-bin
-pkgver=${GITA_VERSION:-1.1.0}
+pkgver=${GITA_VERSION:-1.1.1}
 pkgrel=1
 pkgdesc='Keeps each git project on the right GitHub account'
 arch=('x86_64')
