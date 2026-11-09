@@ -75,9 +75,14 @@ void main() {
     }
 
     // A machine-wide helper standing in for Git Credential Manager, which
-    // remembers one login per host.
+    // remembers one login per host. The empty `helper =` first clears any
+    // helper git has built in: Apple's git (Xcode / Command Line Tools)
+    // ships its own config with `credential.helper = osxkeychain`, which
+    // GIT_CONFIG_SYSTEM doesn't replace, and would otherwise hand the test
+    // the real GitHub login saved in this Mac's Keychain.
     final system = File('${home.path}/gitconfig_system');
     await system.writeAsString('[credential]\n'
+        '    helper =\n'
         '    helper = "!f() { cat >/dev/null; echo username=x; '
         'echo password=from-system; }; f"\n');
 

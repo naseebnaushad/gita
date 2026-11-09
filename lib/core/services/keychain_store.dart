@@ -135,19 +135,50 @@ class MacKeychainStore extends KeychainStore {
 
   @override
   Future<String?> read(String key) async {
-    final result = await Process.run(_security, [
-      'find-generic-password',
-      '-s', keychainServiceName,
-      '-a', key,
-      '-w',
-    ]);
+    // `-g` rather than `-w`: `-w` prints the secret as bare hex whenever it
+    // has non-ASCII bytes, quotes or backslashes, which can't be told apart
+    // from a secret that is itself hex. `-g` prints `password: "<secret>"`
+    // or, in those cases, `password: 0x<HEX>  "<escaped>"` (on stderr).
+    final result = await Process.run(
+      _security,
+      ['find-generic-password', '-s', keychainServiceName, '-a', key, '-g'],
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    );
     // 44 = errSecItemNotFound.
     if (result.exitCode == 44) return null;
+    final stderr = result.stderr as String;
     if (result.exitCode != 0) {
       throw KeychainException('security find-generic-password failed: '
-          '${(result.stderr as String).trim()}');
+          '${stderr.trim()}');
     }
-    return (result.stdout as String).replaceFirst(RegExp(r'\n$'), '');
+    final secret = parsePasswordLine(stderr);
+    if (secret == null) {
+      throw KeychainException(
+          "security find-generic-password didn't print the password");
+    }
+    return secret;
+  }
+
+  /// Picks the secret out of `security find-generic-password -g` output.
+  static String? parsePasswordLine(String output) {
+    for (final line in const LineSplitter().convert(output)) {
+      if (!line.startsWith('password:')) continue;
+      final rest = line.substring('password:'.length).trim();
+      final hex = RegExp(r'^0x([0-9A-Fa-f]*)').firstMatch(rest);
+      if (hex != null) {
+        final digits = hex.group(1)!;
+        return utf8.decode([
+          for (var i = 0; i + 1 < digits.length; i += 2)
+            int.parse(digits.substring(i, i + 2), radix: 16),
+        ], allowMalformed: true);
+      }
+      if (rest.length >= 2 && rest.startsWith('"') && rest.endsWith('"')) {
+        return rest.substring(1, rest.length - 1);
+      }
+      return rest; // An empty password prints as just `password:`.
+    }
+    return null;
   }
 
   @override

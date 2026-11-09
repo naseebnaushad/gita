@@ -134,6 +134,7 @@ extension _OnboardCommand on GitaCli {
     runProcess: runProcess,
     runInteractive: runInteractive,
     environment: environment,
+    pathSetup: pathSetup,
     commandRunner: commandRunner,
     prompter: prompter,
     hostOs: hostOs,
@@ -251,6 +252,7 @@ extension _OnboardCommand on GitaCli {
 
       // ---- Steps ----
       final knownLogins = <String, String?>{};
+      String? lastCloneProblem;
       Future<Profile?> profileOf(String accountId) async =>
           (await ProfileRepository(paths: paths).getAll()).where((x) => x.id == profileIds[accountId]).firstOrNull;
 
@@ -306,9 +308,30 @@ extension _OnboardCommand on GitaCli {
                   accountEmail: emails[s.account]!,
                   orgName: s.url.split('/')[3],
                   clone: () async {
-                    final code = await _child().run(['clone', s.url, dir, '--profile', profileIds[s.account]!]);
+                    // --json: Gita's clone says what went wrong (signIn, helper,
+                    // sshKey), so the repo step can explain the right fix.
+                    final buffer = StringBuffer();
+                    final code = await _child(
+                      out: buffer,
+                      err: buffer,
+                    ).run(['clone', s.url, dir, '--profile', profileIds[s.account]!, '--json']);
+                    lastCloneProblem = null;
+                    try {
+                      final result =
+                          jsonDecode(LineSplitter.split(buffer.toString().trim()).last) as Map<String, Object?>;
+                      final message = result['message'] as String?;
+                      if (message != null) code == ExitCodes.ok ? r.note(message) : r.warn(message);
+                      final gitSaid = result['gitSaid'] as String?;
+                      if (gitSaid != null && code != ExitCodes.ok) r.note('git said: $gitSaid');
+                      lastCloneProblem = result['problem'] as String?;
+                    } on FormatException {
+                      r.note(buffer.toString().trim());
+                    } on TypeError {
+                      r.note(buffer.toString().trim());
+                    }
                     return code == ExitCodes.ok;
                   },
+                  cloneProblem: () => lastCloneProblem,
                   offerRetry: options.skipSignIn || !ask.interactive
                       ? null
                       : () async {

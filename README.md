@@ -123,7 +123,20 @@ gita guard install [folder]   # add the safety check to a project (the app does 
 gita guard remove [folder]    # take it out again
 gita guard status [folder]    # is it in place?
 gita mcp add-to-claude        # let Claude Code ask Gita (see below)
+gita path [status|add|remove] # whether new terminals find the gita command
 ```
+
+**Typing `gita` in a terminal.** The command lives in `~/.gita/bin`. On
+macOS and Linux the app puts that folder on your PATH the first time it
+starts, by adding a short block marked `# >>> gita >>>` to your shell's
+startup file: `~/.zprofile` for zsh on a Mac, `~/.profile` (or
+`~/.bash_profile`) on Linux, plus `~/.bashrc`, `~/.zshrc` and fish's
+`conf.d/gita.fish` when you use those. Open a new terminal window after
+that. The block adds `~/.gita/bin` at the end of PATH, so another program
+called `gita` you already have keeps working. `gita path remove` takes it
+out again, and the app won't put it back; `gita path add` adds it
+yourself. On Windows the installer offers this instead, and the Linux
+packages (.deb, .rpm, Arch) put `gita` in `/usr/bin`.
 
 Add `--json` to any command for machine-readable output (except
 `gita gh`, which passes `--json` on to `gh`). Exit codes:
@@ -378,22 +391,17 @@ how to replace it. Doctor (in the app and `gita doctor`) warns about
 profiles with no token, and about tokens saved while the `gita` command is
 not installed yet.
 
-Gita installs the command by itself. Windows and Linux builds of the app
-carry a copy in a `cli` folder next to the app, and every time Gita starts
+Gita installs the command by itself. The app carries a copy (in a `cli`
+folder next to the app on Windows and Linux, and in
+`Gita.app/Contents/Resources/cli` on macOS), and every time Gita starts
 it copies that to `~/.gita/bin` if it is missing or out of date, then
 rewrites the profiles' git settings so saved sign-ins start working.
 Nobody has to install anything by hand.
 
 The build does this through a step at the end of `windows/CMakeLists.txt`
-and `linux/CMakeLists.txt`, which runs `dart build cli` (about 5 seconds).
-macOS builds don't include it yet; on a Mac, install it by hand:
-
-```
-dart build cli
-mkdir -p ~/.gita/bin && cp build/cli/*/bundle/bin/gita ~/.gita/bin/
-```
-
-then open each profile in Gita and press Save again.
+and `linux/CMakeLists.txt`, and a build phase that runs
+`macos/scripts/bundle_cli.sh`; each runs `dart build cli` (about 5
+seconds).
 
 #### Signing in from the command line
 

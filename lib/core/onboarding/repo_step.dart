@@ -82,6 +82,12 @@ class RepoEnsurer {
   /// after a failed download (the caller asked the person and signed them in
   /// again), the download is tried once more.
   ///
+  /// [cloneProblem], when given, says what the last failed download ran into
+  /// (`signIn`, `helper` or `sshKey`, as `gita clone --json` reports it), so
+  /// the explanation fits: a sign-in problem lists the likely causes with the
+  /// organization's approval of the Gita app first; the other two say what
+  /// to fix and don't offer to sign in again, which wouldn't help.
+  ///
   /// Returns one of: 'downloaded', 'updated', 'kept (update failed)',
   /// 'kept (local changes)', 'dry run', 'failed'.
   Future<RepoOutcome> ensure({
@@ -94,6 +100,7 @@ class RepoEnsurer {
     required String orgName,
     required Future<bool> Function() clone,
     Future<bool> Function()? offerRetry,
+    String? Function()? cloneProblem,
   }) async {
     if (FileSystemEntity.typeSync(dir, followLinks: false) != FileSystemEntityType.notFound) {
       final state = await _state(dir, url);
@@ -131,6 +138,7 @@ class RepoEnsurer {
       orgName: orgName,
       clone: clone,
       offerRetry: offerRetry,
+      cloneProblem: cloneProblem,
     );
   }
 
@@ -204,6 +212,7 @@ class RepoEnsurer {
     required String orgName,
     required Future<bool> Function() clone,
     required Future<bool> Function()? offerRetry,
+    String? Function()? cloneProblem,
   }) async {
     _reporter.say('Downloading $name');
     if (_dryRun) {
@@ -214,8 +223,10 @@ class RepoEnsurer {
       if (await _tryClone(clone)) return const RepoOutcome('downloaded');
       // The folder did not exist before this clone, so anything left is a partial copy.
       await _removePartial(dir);
-      _explainCloneFailure(name, profileLabel, profileLogin, accountEmail, orgName);
-      if (attempt != 1 || offerRetry == null) break;
+      final problem = cloneProblem?.call();
+      _explainCloneFailure(name, profileLabel, profileLogin, accountEmail, orgName, problem);
+      // Signing in again only helps when the sign-in itself was the problem.
+      if (attempt != 1 || offerRetry == null || problem == 'helper' || problem == 'sshKey') break;
       if (!await offerRetry()) break;
     }
     return const RepoOutcome('failed', failed: true, hint: 'Check the causes listed above, then run this again.');
@@ -240,8 +251,18 @@ class RepoEnsurer {
     }
   }
 
-  void _explainCloneFailure(String name, String label, String? login, String email, String org) {
+  void _explainCloneFailure(String name, String label, String? login, String email, String org, String? problem) {
     final who = (login == null || login.trim().isEmpty) ? 'unknown' : login.trim();
+    if (problem == 'helper') {
+      _reporter.warn("Couldn't download $name: git never got a sign-in from Gita (the gita command didn't run).");
+      _reporter.note('Run "gita doctor --fix" (or install Gita again), then run this again.');
+      return;
+    }
+    if (problem == 'sshKey') {
+      _reporter.warn("Couldn't download $name: GitHub didn't accept the SSH key of \"$label\".");
+      _reporter.note('Run "gita doctor" to check the key, or clone over https, then run this again.');
+      return;
+    }
     _reporter.warn("Couldn't download $name. Likely causes:");
     _reporter.note("  1. The organization $org hasn't approved the Gita app yet (the most common cause). On");
     _reporter.note('     github.com open Settings > Applications > Authorized OAuth Apps > Gita, click');

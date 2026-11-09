@@ -108,6 +108,7 @@ void main() {
     Future<bool> Function()? clone,
     Future<bool> Function()? offerRetry,
     String url = _url,
+    String? problem,
   }) => ensurer(dryRun: dryRun).ensure(
     url: url,
     dir: dir,
@@ -118,6 +119,7 @@ void main() {
     orgName: 'acme',
     clone: clone ?? goodClone,
     offerRetry: offerRetry,
+    cloneProblem: () => problem,
   );
 
   setUp(() async {
@@ -338,6 +340,54 @@ void main() {
     expect(asked, 1);
     expect(cloneCalls, 2);
     expect(FileSystemEntity.typeSync(dir), FileSystemEntityType.notFound);
+  });
+
+  test("clone fails because Gita's helper did not run: says so, no org causes, no retry offered", () async {
+    var asked = 0;
+    final r = await ensure(
+      clone: badClone,
+      problem: 'helper',
+      offerRetry: () async {
+        asked++;
+        return true;
+      },
+    );
+    expect(r.summary, 'failed');
+    expect(asked, 0, reason: 'signing in again would not help');
+    expect(cloneCalls, 1);
+    final text = reporter.lines.join('\n');
+    expect(text, contains('git never got a sign-in from Gita'));
+    expect(text, contains('gita doctor --fix'));
+    expect(text, isNot(contains('approved the Gita app')));
+  });
+
+  test('clone fails on the SSH key: says so, no retry offered', () async {
+    var asked = 0;
+    final r = await ensure(
+      clone: badClone,
+      problem: 'sshKey',
+      offerRetry: () async {
+        asked++;
+        return true;
+      },
+    );
+    expect(r.summary, 'failed');
+    expect(asked, 0);
+    expect(reporter.warnings.join('\n'), contains("didn't accept the SSH key"));
+  });
+
+  test('clone fails on the sign-in: organization approval listed, retry offered', () async {
+    var asked = 0;
+    await ensure(
+      clone: badClone,
+      problem: 'signIn',
+      offerRetry: () async {
+        asked++;
+        return false;
+      },
+    );
+    expect(asked, 1);
+    expect(reporter.lines.join('\n'), contains("hasn't approved the Gita app"));
   });
 
   test('clone fails, retry declined: failed after one try', () async {
