@@ -266,14 +266,15 @@ void main() {
 
     out.clear();
     expect(await onboard([...answers, '--skip-sign-in', '--skip-repos', '--yes']), ExitCodes.ok, reason: '$out$err');
-    // --yes also lets the clean-up remove the test's insteadOf rule, which makes a fresh
-    // backup first: that one is now the newest and is kept, so all three older ones go.
-    expect(out.toString(), contains('deleted 3'));
+    // With --yes the clean-up may first remove the test's insteadOf rule and make a fresh
+    // backup (it does on Windows), which then is the newest; either way only the newest
+    // backup is left and both 2025 ones are gone.
+    expect(out.toString(), matches(RegExp(r'deleted [23]\b')), reason: '$out');
     final left = [
       for (final e in home.listSync())
         if (p.basename(e.path).startsWith('.gitconfig.backup-')) p.basename(e.path),
     ];
-    expect(left, hasLength(1), reason: 'only the backup made by this run is left: $left');
+    expect(left, hasLength(1), reason: 'only the newest backup is left: $left');
     expect(left.single, isNot(startsWith('.gitconfig.backup-2025')));
   });
 
