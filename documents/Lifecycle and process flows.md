@@ -235,8 +235,8 @@ flowchart LR
   R --> U(["Installers and company setup scripts<br/>pin X.Y.Z + SHA-256"])
 ```
 
-*Figure 8 – Release flow (`.github/workflows/build.yml`, `release.yml`). `SHA256SUMS` is
-added by PR #27, so scripts that pin a version can check new releases.*
+*Figure 8 – Release flow (`.github/workflows/build.yml`, `release.yml`). `SHA256SUMS` comes
+with every release since 1.1.0 (PR #27), so scripts that pin a version can check it.*
 
 ---
 
@@ -251,4 +251,13 @@ added by PR #27, so scripts that pin a version can check new releases.*
 | 2026-11-09 | #24 | `gita` command on PATH for new terminals (`gita path`) |
 | 2026-11-09 | #25 | Clone window offers the fix when a clone can't sign in; clone errors classified |
 | 2026-11-09 | 1.0.3 | Release with #21–#25 |
-| 2026-11-09 | #27 (open) | `gita onboard`, clean-up, old backups, `read:org`, `SHA256SUMS`, isolated smoke test |
+| 2026-11-09 | #27 | `gita onboard`, clean-up, old backups, `read:org`, `SHA256SUMS`, isolated smoke test (merged 10:11 UTC) |
+| 2026-11-09 | #28, 1.1.0 | Version bump and release 1.1.0 with `gita onboard` (10:44 UTC) |
+| 2026-11-09 | #29 | Windows: `gita onboard` starts Windows PowerShell 5.1 (Claude Code installer, setup scripts) without PowerShell 7's `PSModulePath`, which stopped the installer with "Get-FileHash is not recognized". Found by a company installer's CI on `windows-latest` |
+| 2026-11-09 | #30, 1.1.1 | Version bump and release 1.1.1 with #29 (11:17 UTC, Latest) |
+
+Used by: a company setup script pinned 1.1.1 the same day. Its first real Windows run
+worked through every Gita step; the company's own setup script then could not find
+`claude`, because Claude Code's Windows installer leaves `~\.local\bin` off PATH. That was
+fixed in the company's scripts, not in Gita. A possible Gita follow-up: have the
+`claudeCode` step put that folder on PATH for the steps after it.
