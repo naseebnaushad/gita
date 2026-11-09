@@ -404,9 +404,12 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
               Icon(Icons.check_circle, size: 18, color: scheme.secondary),
               const SizedBox(width: 8),
               Expanded(child: Text('Signed in as @$_githubLogin')),
-              TextButton(
-                onPressed: () => _signIn(flow),
-                child: const Text('Change'),
+              Tooltip(
+                message: 'Sign in again, as this or another GitHub account',
+                child: TextButton(
+                  onPressed: () => _signIn(flow),
+                  child: const Text('Sign in again'),
+                ),
               ),
               TextButton(
                 onPressed: () => setState(() {
