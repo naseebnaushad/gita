@@ -91,12 +91,86 @@ void main() {
       expect(explain('fatal: could not read Username for \'https://github.com\': terminal prompts disabled',
               signedIn: false),
           allOf(contains('Work is not signed in'), contains('check the address')));
-      expect(explain('fatal: Authentication failed for ...'), contains('refused'));
+      expect(explain('fatal: Authentication failed for ...'), contains("didn't accept"));
       expect(explain('fatal: unable to access ...: Could not resolve host: github.com'),
           contains('internet connection'));
       expect(explain("fatal: destination path 'api' already exists and is not an empty directory."),
           contains('already a folder'));
       expect(explain("fatal: '/x/y' does not appear to be a git repository"), contains('green Code button'));
+    });
+
+    CloneError classify(String stderr, {bool signedIn = true, bool helperInstalled = true, String? url}) =>
+        CloneService.classifyCloneError(stderr,
+            profile: _work,
+            url: url ?? 'https://github.com/acme/api',
+            signedIn: signedIn,
+            helperInstalled: helperInstalled);
+
+    const askedForLogin =
+        "fatal: could not read Username for 'https://github.com': terminal prompts disabled";
+
+    test('a signed-in profile whose helper gave git nothing: fix the helper, not the sign-in', () {
+      final helper = classify(askedForLogin);
+      expect(helper.problem, CloneProblem.helper);
+      expect(helper.message, allOf(contains('Work is signed in'), contains("Gita's helper")));
+      expect(helper.message, isNot(contains('again, then')));
+      expect(helper.gitDetail, askedForLogin);
+
+      final missing = classify(askedForLogin, helperInstalled: false);
+      expect(missing.problem, CloneProblem.helper);
+      expect(missing.message, contains("isn't installed"));
+
+      final quit = classify("fatal: credential helper '!\"/h/.gita/bin/gita\" credential' told us to quit");
+      expect(quit.problem, CloneProblem.helper);
+
+      final store = classify("Gita: couldn't open this computer's password store to sign in to GitHub.\n"
+          'Gita: KeychainException: locked\n$askedForLogin');
+      expect(store.problem, CloneProblem.helper);
+      expect(store.message, contains('password store'));
+    });
+
+    test('GitHub turning the saved sign-in down: sign in again', () {
+      for (final stderr in [
+        "remote: Invalid username or token. Password authentication is not supported.\n"
+            "fatal: Authentication failed for 'https://github.com/acme/api.git/'",
+        "fatal: unable to access 'https://github.com/acme/api.git/': The requested URL returned error: 403",
+        'Gita: there is no GitHub sign-in saved for "Work", so this push can\'t sign in.',
+      ]) {
+        final e = classify(stderr);
+        expect(e.problem, CloneProblem.signIn, reason: stderr);
+        expect(e.message, contains('Sign Work in with GitHub again'), reason: stderr);
+      }
+    });
+
+    test('an organization with single sign-on names the organization', () {
+      final e = classify(
+        'remote: The `acme` organization has enabled or enforced SAML SSO.\n'
+        "remote: To access this repository, you must re-authorize the OAuth Application `Gita`.\n"
+        "fatal: unable to access 'https://github.com/acme/api.git/': The requested URL returned error: 403",
+      );
+      expect(e.problem, CloneProblem.signIn);
+      expect(e.message, allOf(contains('acme organization'), contains('single sign-on')));
+    });
+
+    test('not signed in, SSH, and plain failures', () {
+      expect(classify(askedForLogin, signedIn: false).problem, CloneProblem.signIn);
+      expect(classify('remote: Repository not found.', signedIn: false).problem, CloneProblem.signIn);
+      expect(classify('remote: Repository not found.').problem, isNull);
+      expect(classify('git@github.com: Permission denied (publickey).').problem, CloneProblem.sshKey);
+      expect(classify('fatal: unable to access: Could not resolve host: github.com').problem, isNull);
+    });
+
+    test("git's own line is kept, with any password in an address hidden", () {
+      final e = classify(
+        "Cloning into 'api'...\n"
+        "fatal: unable to access 'https://me:ghp_secret123@github.com/acme/api.git/': "
+        'The requested URL returned error: 403\n'
+        'Receiving objects: 0% (0/1)',
+      );
+      expect(e.gitDetail, startsWith('fatal: unable to access'));
+      expect(e.gitDetail, contains('https://***@github.com/acme/api.git/'));
+      expect(e.gitDetail, isNot(contains('ghp_secret123')));
+      expect(CloneService.gitDetail(''), isNull);
     });
 
     test('falls back to git\'s last line', () {

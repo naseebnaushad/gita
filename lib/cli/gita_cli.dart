@@ -21,6 +21,7 @@ import '../core/services/identity_doctor_service.dart';
 import '../core/services/machine_scanner.dart';
 import '../core/services/mismatch_detector.dart';
 import '../core/services/path_resolver.dart';
+import '../core/services/path_setup.dart';
 import '../core/services/platform_paths.dart';
 import '../core/services/push_guard.dart';
 import '../core/services/setup_service.dart';
@@ -73,9 +74,11 @@ class GitaCli {
     ProcessRunner? runProcess,
     InteractiveRunner? runInteractive,
     Map<String, String>? environment,
+    PathSetup? pathSetup,
   })  : runProcess = runProcess ?? _defaultRunProcess,
         runInteractive = runInteractive ?? _defaultRunInteractive,
         environment = environment ?? Platform.environment,
+        pathSetup = pathSetup ?? PathSetup(paths: paths),
         tokenStore = tokenStore ?? TokenStore(),
         openBrowser = openBrowser ?? defaultOpenBrowser {
     this.doctorService = doctorService ??
@@ -84,6 +87,9 @@ class GitaCli {
 
   final StringSink out;
   final StringSink err;
+
+  /// Puts the command on PATH for new terminals (`gita path`).
+  final PathSetup pathSetup;
   final PlatformPaths paths;
   final GitService gitService;
   late final IdentityDoctorService doctorService;
@@ -131,6 +137,7 @@ class GitaCli {
         command()..addFlag('fix', negatable: false, help: 'Fix what can be fixed without you.'),
       )
       ..addCommand('guard', command())
+      ..addCommand('path', command())
       ..addCommand('profiles', command())
       ..addCommand('scan', command())
       ..addCommand(
@@ -249,6 +256,8 @@ class GitaCli {
         return _rule(command, json: json);
       case 'guard':
         return _guard(command.rest, json: json);
+      case 'path':
+        return _path(command.rest, json: json);
       case 'profiles':
         return _profiles(json: json);
       case 'scan':
@@ -307,6 +316,11 @@ Commands:
                    Take the safety check out again.
   guard status [folder]
                    Say whether the safety check is in place.
+  path [status]    Say whether new terminals find the gita command.
+  path add         Make new terminals find it: adds ~/.gita/bin to PATH in
+                   your shell's startup files (zsh, bash, fish; macOS and
+                   Linux). The app does this once by itself.
+  path remove      Take that out again.
   profiles         List your profiles: email, GitHub account, sign-in,
                    SSH key and folders.
   scan [folder...] Look through this computer's projects for the accounts
@@ -790,6 +804,16 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       if (outcome.guardProblem != null) out.writeln('Safety check not added: ${outcome.guardProblem}');
     } else {
       err.writeln(outcome.message);
+      switch (outcome.problem) {
+        case CloneProblem.signIn:
+          err.writeln('To sign in: gita sign-in --profile "${profile.label}"');
+        case CloneProblem.helper:
+          err.writeln('To reinstall it: open the Gita app (it installs the gita command when '
+              'it starts), or run "gita doctor".');
+        case CloneProblem.sshKey || null:
+          break;
+      }
+      if (outcome.gitDetail != null) err.writeln('git said: ${outcome.gitDetail}');
     }
     return outcome.ok ? ExitCodes.ok : ExitCodes.problem;
   }
@@ -1146,6 +1170,60 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       };
 
   // ---------------------------------------------------------------- guard
+
+  Future<int> _path(List<String> rest, {required bool json}) async {
+    const actions = ['status', 'add', 'remove'];
+    if (rest.length > 1 || (rest.isNotEmpty && !actions.contains(rest.first))) {
+      _fail('Usage: gita path [status|add|remove]', json: json);
+      return ExitCodes.usage;
+    }
+    final action = rest.isEmpty ? 'status' : rest.first;
+    final home = paths.homeDir();
+    String tilde(List<String> files) => [
+          for (final f in files) p.isWithin(home, f) ? '~/${p.relative(f, from: home)}' : f,
+        ].join(', ');
+    final before = pathSetup.status();
+    if (action == 'status' || before.state == PathSetupState.unsupported ||
+        before.state == PathSetupState.providedElsewhere) {
+      final ok = before.state != PathSetupState.notAdded;
+      if (json) {
+        out.writeln(_encode({'ok': ok, ...before.toJson(), 'command': paths.cliPath}));
+      } else {
+        out.writeln(switch (before.state) {
+          PathSetupState.added => 'New terminals find gita (set up in ${tilde(before.files)}).',
+          PathSetupState.notAdded =>
+            'New terminals don\'t find gita yet. Run "${paths.cliPath} path add" to fix that.',
+          _ => before.note!,
+        });
+      }
+      return action == 'status' && !ok ? ExitCodes.problem : ExitCodes.ok;
+    }
+
+    final result = action == 'add' ? await pathSetup.add() : await pathSetup.remove();
+    if (json) {
+      out.writeln(_encode({
+        'ok': result.ok,
+        'changed': result.changed,
+        'files': result.files,
+        if (result.error != null) 'error': result.error,
+        'state': pathSetup.status().state.name,
+      }));
+    } else {
+      if (action == 'add') {
+        out.writeln(result.changed.isEmpty
+            ? 'Already done: new terminals find gita.'
+            : 'Done: added ~/.gita/bin to PATH in ${tilde(result.changed)}.\n'
+                'Open a new terminal window to use "gita".');
+      } else {
+        out.writeln(result.changed.isEmpty
+            ? 'Nothing to take out: Gita had not added itself to PATH.'
+            : 'Done: took Gita out of ${tilde(result.changed)}. '
+                "The app won't add it back.");
+      }
+      if (result.error != null) err.writeln(result.error);
+    }
+    return result.ok ? ExitCodes.ok : ExitCodes.problem;
+  }
 
   Future<int> _guard(List<String> rest, {required bool json}) async {
     const actions = ['install', 'remove', 'status'];

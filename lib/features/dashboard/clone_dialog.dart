@@ -7,6 +7,8 @@ import '../../core/models/profile.dart';
 import '../../core/providers.dart';
 import '../../core/services/clone_service.dart';
 import '../../core/services/path_resolver.dart';
+import '../profiles/github_sign_in_dialog.dart';
+import '../profiles/profiles_screen.dart' show showProfileEditor;
 
 /// Opens the clone dialog. Returns the outcome when something was cloned.
 Future<CloneOutcome?> showCloneDialog(BuildContext context) => showDialog<CloneOutcome>(
@@ -34,6 +36,13 @@ class _CloneDialogState extends ConsumerState<CloneDialog> {
   String? _progress;
   String? _error;
 
+  /// For a failed clone: what can fix it, and git's own words.
+  CloneProblem? _problem;
+  String? _gitDetail;
+
+  /// Said after a fix worked ("Signed in as @x. Press Clone to try again.").
+  String? _notice;
+
   @override
   void dispose() {
     _url.dispose();
@@ -55,7 +64,14 @@ class _CloneDialogState extends ConsumerState<CloneDialog> {
       );
       if (suggested != null) await _setProfile(suggested, picked: false);
     }
-    setState(() => _error = null);
+    setState(_clearProblem);
+  }
+
+  void _clearProblem() {
+    _error = null;
+    _problem = null;
+    _gitDetail = null;
+    _notice = null;
   }
 
   Future<void> _setProfile(Profile profile, {required bool picked}) async {
@@ -110,7 +126,7 @@ class _CloneDialogState extends ConsumerState<CloneDialog> {
     }
     setState(() {
       _busy = true;
-      _error = null;
+      _clearProblem();
       _progress = 'Starting…';
     });
     final outcome = await ref.read(cloneActionsProvider).clone(
@@ -129,9 +145,76 @@ class _CloneDialogState extends ConsumerState<CloneDialog> {
         _busy = false;
         _progress = null;
         _error = outcome.message;
+        _problem = outcome.problem;
+        _gitDetail = outcome.gitDetail;
       });
     }
   }
+
+  /// Runs the fix for [_problem], then says what to do next.
+  Future<void> _fix() async {
+    final profile = _profile;
+    final problem = _problem;
+    if (profile == null || problem == null) return;
+    setState(() => _busy = true);
+    String? notice;
+    try {
+      switch (problem) {
+        case CloneProblem.signIn:
+          notice = await _signIn(profile);
+        case CloneProblem.helper:
+          notice = await ref.read(doctorActionsProvider).installCli();
+        case CloneProblem.sshKey:
+          await showProfileEditor(context, profile);
+      }
+    } catch (e) {
+      notice = "That didn't work: ${e is StateError ? e.message : e}";
+    }
+    if (!mounted) return;
+    // The profile may have changed (new sign-in, SSH key): read it again.
+    final profiles = await ref.read(profilesProvider.future);
+    final fresh = profiles.where((x) => x.id == profile.id).firstOrNull ?? profile;
+    final signedIn = await ref.read(secureTokenServiceProvider).hasToken(fresh.id);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _profile = fresh;
+      _signedIn = signedIn;
+      if (notice != null) {
+        _clearProblem();
+        _notice = '$notice Press Clone to try again.';
+      }
+    });
+  }
+
+  /// GitHub sign-in for [profile], saved like Doctor does. Without Gita's
+  /// GitHub sign-in app, opens the profile so a token can be pasted.
+  /// Returns what to tell the person, or null if they gave up.
+  Future<String?> _signIn(Profile profile) async {
+    final flow = ref.read(gitHubDeviceFlowProvider);
+    if (flow == null) {
+      await showProfileEditor(context, profile);
+      final signedIn = await ref.read(secureTokenServiceProvider).hasToken(profile.id);
+      return signedIn ? '${profile.label} is signed in.' : null;
+    }
+    final result = await showDialog<GitHubSignInResult>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => GitHubSignInDialog(flow: flow, expectedLogin: profile.githubLogin),
+    );
+    if (result == null) return null;
+    await ref
+        .read(doctorActionsProvider)
+        .saveSignIn(profile.id, token: result.token, login: result.account.login);
+    return 'Signed in as @${result.account.login}.';
+  }
+
+  String get _fixLabel => switch (_problem) {
+        CloneProblem.signIn => 'Sign in with GitHub',
+        CloneProblem.helper => 'Reinstall the gita command',
+        CloneProblem.sshKey => 'Open the profile',
+        null => '',
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -211,6 +294,29 @@ class _CloneDialogState extends ConsumerState<CloneDialog> {
                   if (_error != null) ...[
                     const SizedBox(height: 12),
                     Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    if (_gitDetail != null) ...[
+                      const SizedBox(height: 4),
+                      SelectableText('git said: $_gitDetail',
+                          style: muted.copyWith(fontSize: 12)),
+                    ],
+                    if (_problem != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FilledButton.tonalIcon(
+                          onPressed: _busy ? null : _fix,
+                          icon: Icon(
+                            _problem == CloneProblem.helper ? Icons.build_outlined : Icons.login,
+                            size: 18,
+                          ),
+                          label: Text(_fixLabel),
+                        ),
+                      ),
+                    ],
+                  ],
+                  if (_notice != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_notice!, style: TextStyle(color: Theme.of(context).colorScheme.secondary)),
                   ],
                 ],
               ),
