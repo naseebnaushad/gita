@@ -28,7 +28,7 @@ void main() {
     expect(code.interval, const Duration(seconds: 5));
     final form = github.posts.single.$2;
     expect(form['client_id'], 'Ov23liTEST');
-    expect(form['scope']!.split(' '), containsAll(['repo', 'workflow', 'write:public_key']));
+    expect(form['scope']!.split(' '), containsAll(['repo', 'workflow', 'write:public_key', 'read:org']));
   });
 
   test('waits while pending, slows down when asked, then returns the token', () async {

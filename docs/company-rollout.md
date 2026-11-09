@@ -55,6 +55,15 @@ Put these where everyone can get them, for example the team wiki or chat:
 
 You can copy Part 2 into a message as it is.
 
+### Or: one command for the whole setup
+
+Instead of Part 2, you can write an **onboarding file** that lists the
+tools, accounts and repositories a new developer needs, and have them run
+`gita onboard <file>`. Gita installs or repairs git, the GitHub CLI and
+Claude Code, removes old GitHub sign-ins that would use the wrong account,
+adds and signs in a profile per account, clones your repositories and
+imports their company files. See [onboarding.md](onboarding.md).
+
 ## Part 2: for each developer (about 10 minutes)
 
 1. **Install Gita.** Unpack the download and open **gita**.
