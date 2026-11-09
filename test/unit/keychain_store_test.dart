@@ -12,38 +12,47 @@ void main() {
   final key = 'test.${DateTime.now().microsecondsSinceEpoch}';
   final store = KeychainStore.forPlatform();
 
-  tearDown(() => store.delete(key));
+  group('the real credential store', () {
+    // Only the real-store test cleans up there; elsewhere (Linux CI without
+    // a desktop session) the store can't be reached at all.
+    tearDown(() => store.delete(key));
 
-  test('write, read, overwrite and delete a secret', () async {
-    expect(await store.read(key), isNull);
+    test(
+      'write, read, overwrite and delete a secret',
+      () async {
+        expect(await store.read(key), isNull);
 
-    await store.write(key, 'ghp_first ünïcode');
-    expect(await store.read(key), 'ghp_first ünïcode');
+        await store.write(key, 'ghp_first ünïcode');
+        expect(await store.read(key), 'ghp_first ünïcode');
 
-    await store.write(key, 'ghp_second');
-    expect(await store.read(key), 'ghp_second');
+        await store.write(key, 'ghp_second');
+        expect(await store.read(key), 'ghp_second');
 
-    await store.delete(key);
-    expect(await store.read(key), isNull);
+        await store.delete(key);
+        expect(await store.read(key), isNull);
 
-    // Deleting something that isn't there is fine.
-    await store.delete(key);
+        // Deleting something that isn't there is fine.
+        await store.delete(key);
 
-    // Secrets the store must give back exactly. On macOS, `security`
-    // prints some of these in hex or needs them quoted on its input line.
-    for (final secret in [
-      'deadbeef', // looks like the hex `security -w` would print
-      r'with "quotes" and \back\slashes',
-      '  spaces around  ',
-      "it's ünïcode — ✓",
-      'gho_${'A1b2' * 20}',
-      '',
-    ]) {
-      await store.write(key, secret);
-      expect(await store.read(key), secret, reason: 'secret: <$secret>');
-    }
-  }, skip: !(Platform.isWindows ||
-      (Platform.isMacOS && Platform.environment['GITA_TEST_KEYCHAIN'] == '1')));
+        // Secrets the store must give back exactly. On macOS, `security`
+        // prints some of these in hex or needs them quoted on its input line.
+        for (final secret in [
+          'deadbeef', // looks like the hex `security -w` would print
+          r'with "quotes" and \back\slashes',
+          '  spaces around  ',
+          "it's ünïcode — ✓",
+          'gho_${'A1b2' * 20}',
+          '',
+        ]) {
+          await store.write(key, secret);
+          expect(await store.read(key), secret, reason: 'secret: <$secret>');
+        }
+      },
+      skip:
+          !(Platform.isWindows ||
+              (Platform.isMacOS && Platform.environment['GITA_TEST_KEYCHAIN'] == '1')),
+    );
+  });
 
   group('MacKeychainStore reads `security -g` output', () {
     String? parse(String s) => MacKeychainStore.parsePasswordLine(s);
