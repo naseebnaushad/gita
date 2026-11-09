@@ -415,6 +415,7 @@ extension _OnboardCommand on GitaCli {
                 script,
               ],
               io: CommandIo.show,
+              environment: os == HostOs.windows ? windowsPowerShellEnvironment : const {},
               workingDirectory: repo,
               timeout: const Duration(minutes: 15),
             );

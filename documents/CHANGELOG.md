@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 (unreleased)
+
+- Windows: `gita onboard` started from PowerShell 7 could not install Claude
+  Code ("Get-FileHash is not recognized"): Windows PowerShell inherited
+  PowerShell 7's module path. It now gets its own, also for setup scripts.
+
 ## 1.1.0 (2026-11-09)
 
 - `gita onboard <file>`: set a new computer up from one onboarding file:
