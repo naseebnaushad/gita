@@ -198,6 +198,26 @@ void main() {
     expect((await ProfileRepository(paths: paths).getAll()).length, 2, reason: 'no duplicate profiles');
   });
 
+  test('a rerun repairs a copy with local changes that lost a file setup needs', () async {
+    expect(await onboard([...answers, '--skip-sign-in']), ExitCodes.ok, reason: '$out$err');
+    final repo = p.join(home.path, 'handbook');
+    File(p.join(repo, 'gita', 'lab.json')).deleteSync();
+    File(p.join(repo, 'notes.txt')).writeAsStringSync('mine');
+
+    out.clear();
+    final again = await onboard([...answers, '--skip-sign-in']);
+    final text = '$out$err';
+    expect(again, ExitCodes.ok, reason: text);
+    expect(text, contains('missing gita/lab.json, which setup needs'));
+    expect(text, contains('downloaded again (old copy in handbook.backup-'));
+    expect(text, isNot(contains('Setup stopped')));
+    expect(File(p.join(repo, 'gita', 'lab.json')).existsSync(), isTrue, reason: text);
+    final backup = home.listSync().whereType<Directory>().singleWhere(
+      (d) => p.basename(d.path).startsWith('handbook.backup-'),
+    );
+    expect(File(p.join(backup.path, 'notes.txt')).readAsStringSync(), 'mine');
+  });
+
   test('a dry run changes nothing', () async {
     final code = await onboard([...answers, '--dry-run']);
 
