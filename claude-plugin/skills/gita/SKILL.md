@@ -71,7 +71,12 @@ say in one sentence what it will change.
    other steps and tell the user it's still to do.
 5. `gita_doctor` with `fix: true`, then explain anything left. Until a
    profile is signed in, the doctor warns it has no GitHub sign-in:
-   that's expected, and the fix is step 4, not a token.
+   that's expected, and the fix is step 4, not a token. If it says a
+   sign-in "has stopped working" (GitHub cancelled it), `gita_sign_in`
+   for that profile is the fix. Otherwise don't sign in again: each new
+   sign-in can cancel an older one (GitHub keeps 10). `gita_sign_in` on
+   a working sign-in changes nothing (`alreadySignedIn: true`); pass
+   `force: true` only to switch accounts.
 6. `gita_check` each project, then sum up for the user in plain words:
    each profile, the folders and organizations that use it, and what's
    still to do.

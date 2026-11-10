@@ -8,6 +8,7 @@ import '../../core/models/profile.dart';
 import '../../core/models/ssh_key.dart';
 import '../../core/providers.dart';
 import '../../core/services/github_device_flow.dart';
+import '../../core/services/sign_in_checker.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/initials_avatar.dart';
 import '../../widgets/screen_header.dart';
@@ -235,6 +236,9 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
   /// The profile's SSH key, saved with the profile.
   String? _sshKeyId;
 
+  /// GitHub said the saved sign-in no longer works (it was cancelled).
+  bool _signInRejected = false;
+
   @override
   void initState() {
     super.initState();
@@ -256,6 +260,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
           // A token without a recorded login was pasted: keep showing it.
           _showTokenField = _githubLogin == null;
         });
+        _checkSignIn(token);
       });
     }
   }
@@ -379,7 +384,10 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     final tokenField = TextFormField(
       controller: _tokenController,
       obscureText: _obscureToken,
-      onChanged: (_) => setState(() => _githubLogin = null),
+      onChanged: (_) => setState(() {
+        _githubLogin = null;
+        _signInRejected = false;
+      }),
       decoration: InputDecoration(
         labelText: 'GitHub access token (for HTTPS pushes)',
         helperText: 'Stored in the OS keychain, never in plain files.',
@@ -398,7 +406,25 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
         Text('GitHub account for pushes',
             style: theme.textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant)),
         const SizedBox(height: 8),
-        if (signedIn)
+        if (signedIn && _signInRejected)
+          Row(
+            children: [
+              Icon(Icons.error_outline, size: 18, color: scheme.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "@$_githubLogin's sign-in stopped working: GitHub cancelled it. "
+                  'Sign in again to push.',
+                  style: TextStyle(color: scheme.error),
+                ),
+              ),
+              FilledButton.tonal(
+                onPressed: () => _signIn(flow),
+                child: const Text('Sign in again'),
+              ),
+            ],
+          )
+        else if (signedIn)
           Row(
             children: [
               Icon(Icons.check_circle, size: 18, color: scheme.secondary),
@@ -412,6 +438,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
                 onPressed: () => setState(() {
                   _tokenController.clear();
                   _githubLogin = null;
+                  _signInRejected = false;
                 }),
                 child: const Text('Sign out'),
               ),
@@ -510,6 +537,19 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     if (key != null && mounted) setState(() => _sshKeyId = key.id);
   }
 
+  /// Asks GitHub whether the saved sign-in still works, so a cancelled one
+  /// shows as such instead of "Signed in". Says nothing when GitHub can't
+  /// be reached.
+  Future<void> _checkSignIn(String token) async {
+    final checker = ref.read(signInCheckerProvider);
+    if (checker == null) return;
+    final result = await checker.check(token);
+    if (!mounted || _tokenController.text.trim() != token) return;
+    if (result.health == SignInHealth.rejected) {
+      setState(() => _signInRejected = true);
+    }
+  }
+
   Future<void> _signIn(GitHubDeviceFlow flow) async {
     final result = await showDialog<GitHubSignInResult>(
       context: context,
@@ -524,6 +564,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     setState(() {
       _tokenController.text = result.token;
       _githubLogin = account.login;
+      _signInRejected = false;
       _showTokenField = false;
       // Fill in the commit identity for new profiles, never overwrite it.
       final name = account.name?.trim();

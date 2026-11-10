@@ -277,6 +277,8 @@ void main() {
         ['company', '--json', '--', 'import', '/c/acme.gita.json']);
     expect(await args('gita_guard', {'action': 'install', 'path': '/p/a'}), ['guard', '--json', '--', 'install', '/p/a']);
     expect(await args('gita_sign_in', {'profile': 'Work'}), ['sign-in', '--profile', 'Work', '--no-wait', '--json']);
+    expect(await args('gita_sign_in', {'profile': 'Work', 'force': true}),
+        ['sign-in', '--profile', 'Work', '--no-wait', '--force', '--json']);
     expect(await args('gita_doctor', {'fix': true}), ['doctor', '--fix', '--json']);
     expect(await args('gita_doctor', {}), ['doctor', '--json']);
 

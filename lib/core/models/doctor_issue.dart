@@ -18,6 +18,14 @@ enum DoctorCategory {
   /// The OS credential store couldn't be read at all.
   keychainUnavailable,
 
+  /// GitHub no longer accepts a profile's saved sign-in (it was cancelled
+  /// or expired), so its pushes fail until it is signed in again.
+  signInRejected,
+
+  /// A profile's saved sign-in works, but belongs to a different GitHub
+  /// account than the one the profile names.
+  signInWrongAccount,
+
   /// A company organization's projects use a profile without a company
   /// email.
   companyEmailMismatch,

@@ -24,6 +24,7 @@ import '../core/services/path_resolver.dart';
 import '../core/services/platform_paths.dart';
 import '../core/services/push_guard.dart';
 import '../core/services/setup_service.dart';
+import '../core/services/sign_in_checker.dart';
 import '../core/services/ssh_config_service.dart';
 import '../core/services/token_store.dart';
 import '../core/storage/repositories.dart';
@@ -70,11 +71,20 @@ class GitaCli {
     this.deviceFlow,
     Future<bool> Function(Uri url)? openBrowser,
     ProcessRunner? runProcess,
+    SignInChecker? signInChecker,
   })  : runProcess = runProcess ?? _defaultRunProcess,
         tokenStore = tokenStore ?? TokenStore(),
+        // Only the real token store gets the real (network) checker by
+        // default, so a caller with its own store, such as a test, never
+        // calls GitHub by accident.
+        signInChecker = signInChecker ?? (tokenStore == null ? GitHubSignInChecker() : null),
         openBrowser = openBrowser ?? defaultOpenBrowser {
     this.doctorService = doctorService ??
-        IdentityDoctorService(paths: paths, tokenStore: this.tokenStore);
+        IdentityDoctorService(
+          paths: paths,
+          tokenStore: this.tokenStore,
+          signInChecker: this.signInChecker,
+        );
   }
 
   final StringSink out;
@@ -83,6 +93,11 @@ class GitaCli {
   final GitService gitService;
   late final IdentityDoctorService doctorService;
   final TokenStore tokenStore;
+
+  /// Asks GitHub whether a saved sign-in still works: for `gita doctor`,
+  /// the message when a push is rejected, and skipping needless sign-ins.
+  /// Null skips those checks.
+  final SignInChecker? signInChecker;
 
   /// What git writes to the credential helper. Defaults to stdin.
   final Stream<List<int>>? input;
@@ -161,6 +176,10 @@ class GitaCli {
           ..addOption('profile', help: 'Name or id of the profile to sign in.')
           ..addFlag('with-token', negatable: false, help: 'Read a token from stdin.')
           ..addFlag('no-browser', negatable: false, help: "Don't open the browser.")
+          ..addFlag('force',
+              negatable: false,
+              help: 'Sign in again even if the saved sign-in still works '
+                  '(for example to switch GitHub accounts).')
           // Used by `gita mcp`: print the code and finish in the background.
           ..addFlag('no-wait', negatable: false, hide: true),
       )
@@ -319,6 +338,8 @@ Commands:
   sign-in --profile <name or id>
                    Sign a profile in to GitHub (shows a code to enter on
                    github.com), so HTTPS pushes use that account.
+                   Does nothing if its sign-in already works;
+                   --force signs in again anyway.
                    --with-token reads a token from stdin instead;
                    --no-browser doesn't open the browser.
 
@@ -789,6 +810,32 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       return ExitCodes.usage;
     }
 
+    // Each new sign-in makes a new token and GitHub keeps only the 10
+    // newest, so an unneeded one can cancel a sign-in in use elsewhere.
+    if (!(command['with-token'] as bool) && !(command['force'] as bool)) {
+      final working = await _workingSignIn(profile);
+      if (working != null) {
+        if (json) {
+          out.writeln(_encode({
+            'ok': true,
+            'profile': profile.id,
+            'githubLogin': working,
+            'alreadySignedIn': true,
+            'message': '"${profile.label}" is already signed in as @$working '
+                'and that sign-in works, so nothing was changed. Use force '
+                'to sign in again anyway (for example to switch accounts).',
+          }));
+        } else {
+          out
+            ..writeln('"${profile.label}" is already signed in as @$working, and '
+                'that sign-in works. Nothing to do.')
+            ..writeln('To sign in again anyway (for example as a different '
+                'account), add --force.');
+        }
+        return ExitCodes.ok;
+      }
+    }
+
     final flow = deviceFlow ?? _defaultDeviceFlow();
     final String token;
     final GitHubAccount account;
@@ -863,6 +910,27 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       if (emailNote != null) out.writeln(emailNote);
     }
     return ExitCodes.ok;
+  }
+
+  /// The GitHub account [profile]'s saved sign-in works for, when GitHub
+  /// confirms it works and it is the account the profile names. Null when
+  /// there's no sign-in, it doesn't work, or GitHub couldn't be asked.
+  Future<String?> _workingSignIn(Profile profile) async {
+    final checker = signInChecker;
+    if (checker == null) return null;
+    final String? token;
+    try {
+      token = await tokenStore.readToken(profile.id);
+    } catch (_) {
+      return null;
+    }
+    if (token == null || token.isEmpty) return null;
+    final result = await checker.check(token);
+    final login = result.login;
+    if (result.health != SignInHealth.working || login == null) return null;
+    final expected = profile.githubLogin;
+    if (expected != null && expected.toLowerCase() != login.toLowerCase()) return null;
+    return login;
   }
 
   /// Saves a finished sign-in: the token, the GitHub account on the
@@ -1303,17 +1371,57 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
         return ExitCodes.ok;
       case 'erase':
         // Git says GitHub rejected the token. Leave it in place (deleting
-        // would hide what happened) and tell the person how to fix it.
-        err
-          ..writeln('Gita: GitHub did not accept the sign-in saved for '
-              '$name. It may have expired, or it may not have access to '
-              'this project.')
-          ..writeln('Gita: open the Gita app, go to Profiles, edit $name, '
-              'paste a new access token and press Save. Then push again.');
+        // would hide what happened), find out why, and say how to fix it.
+        await _explainRejectedSignIn(profileId, profile, name);
         return ExitCodes.ok;
       default:
         err.writeln('Unknown credential action: ${rest.single}');
         return ExitCodes.usage;
+    }
+  }
+
+  /// Tells the person, on stderr, why GitHub turned down a push's sign-in
+  /// and the one step that fixes it.
+  Future<void> _explainRejectedSignIn(String profileId, Profile? profile, String name) async {
+    final signInAgain = 'open the Gita app, go to Profiles, edit $name and '
+        'press "Sign in with GitHub" (or run: gita sign-in --profile $profileId). '
+        'Then push again.';
+    String? token;
+    try {
+      token = await tokenStore.readToken(profileId);
+    } catch (_) {
+      token = null;
+    }
+    final checker = signInChecker;
+    final result = token == null || token.isEmpty || checker == null
+        ? SignInCheck.unknown
+        : await checker.check(token);
+    switch (result.health) {
+      case SignInHealth.rejected:
+        err
+          ..writeln("Gita: $name's GitHub sign-in has stopped working: GitHub "
+              'no longer accepts it (it may have been cancelled on GitHub).')
+          ..writeln('Gita: sign it in again once: $signInAgain');
+      case SignInHealth.working:
+        final login = result.login;
+        final expected = profile?.githubLogin;
+        if (expected != null && login != null && expected.toLowerCase() != login.toLowerCase()) {
+          err
+            ..writeln('Gita: $name is signed in as @$login, but it should be '
+                '@$expected, and @$login was turned down for this project.')
+            ..writeln('Gita: sign it in again as @$expected: $signInAgain');
+        } else {
+          err
+            ..writeln('Gita: $name is signed in as @$login and that sign-in '
+                "works, but GitHub didn't let it into this project.")
+            ..writeln('Gita: check that @$login can open this project on '
+                'GitHub, or that the project should use $name at all '
+                '(run: gita which). Signing in again will not help.');
+        }
+      case SignInHealth.unknown:
+        err
+          ..writeln('Gita: GitHub did not accept the sign-in saved for $name.')
+          ..writeln('Gita: if this keeps happening, sign it in again: $signInAgain');
     }
   }
 

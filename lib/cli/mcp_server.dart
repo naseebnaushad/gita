@@ -50,6 +50,9 @@ typical setup:
   5. gita_doctor with fix=true, then tell the user about anything left.
      Until a profile is signed in, the doctor warns that it has no
      sign-in; that's expected, and gita_sign_in is the fix.
+If gita_doctor says a sign-in "has stopped working" (GitHub cancelled
+it), gita_sign_in for that profile is the fix. Don't sign in again
+otherwise: each sign-in can cancel an older one (GitHub keeps 10).
 Use gita_rule_add to make a folder, or a GitHub organization's projects,
 use a profile, and gita_guard to add or check a project's safety check.
 
@@ -73,7 +76,8 @@ token: sign-ins go through gita_sign_in.''';
     ),
     _tool(
       'gita_doctor',
-      'Look for setup problems (missing SSH keys, GitHub sign-ins, broken '
+      'Look for setup problems (missing SSH keys, GitHub sign-ins that are '
+          'missing or have stopped working, broken '
           'rules, company email mismatches) and how to fix each one. With '
           'fix=true it first fixes what needs no person: removes rules and SSH '
           'key links that point at something deleted, and makes a company '
@@ -266,8 +270,17 @@ token: sign-ins go through gita_sign_in.''';
       'Sign a profile in to GitHub so HTTPS pushes use its account. Returns '
           'a code and a page right away: tell the user to open the page, sign '
           'in as that account and enter the code. Gita finishes by itself '
-          '(gita_profiles shows signedIn=true). The token never passes through you.',
-      {'profile': _profileProperty},
+          '(gita_profiles shows signedIn=true). The token never passes through you. '
+          'If the profile is already signed in and that sign-in still works, it '
+          'changes nothing and says so (alreadySignedIn=true); force=true signs '
+          'in again anyway, for example to switch accounts.',
+      {
+        'profile': _profileProperty,
+        'force': {
+          'type': 'boolean',
+          'description': 'Sign in again even if the saved sign-in still works.',
+        },
+      },
       required: ['profile'],
       readOnly: false,
       openWorld: true,
@@ -464,6 +477,7 @@ token: sign-ins go through gita_sign_in.''';
           '--profile',
           text('profile', required: true)!,
           '--no-wait',
+          if (args['force'] == true) '--force',
         ],
       _ => throw _BadParams('Unknown tool: $name'),
     };

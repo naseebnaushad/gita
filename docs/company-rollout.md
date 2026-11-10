@@ -134,6 +134,14 @@ marked block inside `~/.gitconfig`. GitHub sign-ins are stored in the
 computer's password store (Keychain, Credential Manager or libsecret),
 never in a plain file.
 
+**Gita keeps asking me to sign in again. Why?** Usually GitHub cancelled
+the saved sign-in: it keeps only the 10 newest per account, so signing
+in many times (on several computers, or several profiles with the same
+account) drops the oldest. Gita's **Doctor** and **Profiles** say when a
+sign-in "has stopped working". Sign that profile in once and it lasts.
+Don't sign in again when Gita says the sign-in works: that only uses up
+another of the 10.
+
 **How do I check one project from a terminal?** Run
 `gita which` inside it (the full path is as in the AI section above). It
 says which account the project should use and which it uses now.
