@@ -173,7 +173,10 @@ stateDiagram-v2
   Check --> Other: not a folder, empty, not git,<br/>another project, damaged
   Clean --> Updated: git pull --ff-only works
   Clean --> KeptUpdateFailed: can't fast-forward / offline
-  Dirty --> KeptLocalChanges
+  Updated --> MovedAside: a file later steps need is still missing
+  KeptUpdateFailed --> MovedAside: a file later steps need is missing
+  Dirty --> KeptLocalChanges: has every file later steps need
+  Dirty --> MovedAside: a file later steps need is missing
   Other --> MovedAside: rename to dir.backup-date
   MovedAside --> Missing
   Missing --> Downloaded: gita clone --profile works
@@ -187,7 +190,10 @@ stateDiagram-v2
   Downloaded --> [*]
 ```
 
-*Figure 6 – States of the repo step (`lib/core/onboarding/repo_step.dart`). A failed clone
+*Figure 6 – States of the repo step (`lib/core/onboarding/repo_step.dart`). "Files later
+steps need" are the `companyFile` paths and this system's `repoScript` for the same folder;
+a copy missing one is replaced (its backup keeps any local changes), so a rerun repairs it,
+and the summary says "downloaded again (old copy in …)". A failed clone
 removes the partial folder. The explanation follows the problem `gita clone --json`
 reports: `signIn` lists the likely causes (organization approval of the Gita app first,
 wrong account, not a member, no connection); `helper` says git never got a sign-in from

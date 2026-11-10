@@ -12,8 +12,8 @@ class RepoOutcome {
   /// Creates an outcome with a short [summary] for the final report.
   const RepoOutcome(this.summary, {this.failed = false, this.hint});
 
-  /// One of 'downloaded', 'updated', 'kept (update failed)',
-  /// 'kept (local changes)', 'dry run' or 'failed'.
+  /// One of 'downloaded', 'downloaded again (old copy in ...)', 'updated',
+  /// 'kept (update failed)', 'kept (local changes)', 'dry run' or 'failed'.
   final String summary;
 
   /// True when the repository is not usable and onboarding should stop.
@@ -45,7 +45,7 @@ class _Move extends _State {
 /// Downloads or updates one repository.
 ///
 /// A copy that isn't usable (not a folder, empty, not a git copy, a copy of a
-/// different project, damaged) is never deleted: it is moved aside to
+/// different project, damaged, missing files setup needs) is never deleted: it is moved aside to
 /// `<dir>.backup-YYYYMMDD-HHMMSS` and a fresh copy is downloaded.
 class RepoEnsurer {
   /// Creates the step. [now] is used for backup names; with [dryRun] nothing
@@ -88,8 +88,15 @@ class RepoEnsurer {
   /// organization's approval of the Gita app first; the other two say what
   /// to fix and don't offer to sign in again, which wouldn't help.
   ///
-  /// Returns one of: 'downloaded', 'updated', 'kept (update failed)',
-  /// 'kept (local changes)', 'dry run', 'failed'.
+  /// [needs] are the files later onboarding steps need from this repository,
+  /// as paths inside it with `/`. A copy without one of them is an old or
+  /// incomplete copy: after the update (and even with local changes) it is
+  /// moved aside and downloaded again, so running onboarding again repairs a
+  /// setup that went wrong.
+  ///
+  /// Returns one of: 'downloaded', 'downloaded again (old copy in ...)',
+  /// 'updated', 'kept (update failed)', 'kept (local changes)', 'dry run',
+  /// 'failed'.
   Future<RepoOutcome> ensure({
     required String url,
     required String dir,
@@ -101,35 +108,37 @@ class RepoEnsurer {
     required Future<bool> Function() clone,
     Future<bool> Function()? offerRetry,
     String? Function()? cloneProblem,
+    List<String> needs = const [],
   }) async {
+    String? backup;
     if (FileSystemEntity.typeSync(dir, followLinks: false) != FileSystemEntityType.notFound) {
       final state = await _state(dir, url);
       switch (state) {
         case _Clean():
-          return _update(dir, name);
+          final updated = await _update(dir, name);
+          // In a dry run nothing was pulled, so the files may still arrive.
+          final missing = _dryRun ? const <String>[] : _missing(dir, needs);
+          if (missing.isEmpty) return updated;
+          backup = _backupName(dir);
+          final stop = await _moveAside(dir, backup, _missingReason(missing));
+          if (stop != null) return stop;
+          _reporter.note('Anything you changed in it is kept in $backup.');
         case _Dirty():
-          _reporter.warn('$name in $dir has local changes, so it was not updated.');
-          return const RepoOutcome('kept (local changes)');
-        case _Move(:final reason):
-          final backup = _backupName(dir);
-          _reporter.warn('$dir is $reason. Moving it to $backup and downloading a fresh copy.');
-          if (_dryRun) {
-            _reporter.note('[dry run] would move $dir to $backup');
-          } else {
-            try {
-              await _entity(dir).rename(backup);
-            } on FileSystemException catch (e) {
-              _reporter.warn("Couldn't move $dir to $backup: ${e.osError?.message ?? e.message}");
-              return const RepoOutcome(
-                'failed',
-                failed: true,
-                hint: 'Close any program using that folder, then run this again.',
-              );
-            }
+          final missing = _missing(dir, needs);
+          if (missing.isEmpty) {
+            _reporter.warn('$name in $dir has local changes, so it was not updated.');
+            return const RepoOutcome('kept (local changes)');
           }
+          backup = _backupName(dir);
+          final stop = await _moveAside(dir, backup, _missingReason(missing));
+          if (stop != null) return stop;
+          if (!_dryRun) _reporter.note('Your local changes are kept in $backup.');
+        case _Move(:final reason):
+          final stop = await _moveAside(dir, _backupName(dir), reason);
+          if (stop != null) return stop;
       }
     }
-    return _clone(
+    final outcome = await _clone(
       dir: dir,
       name: name,
       profileLabel: profileLabel,
@@ -140,7 +149,41 @@ class RepoEnsurer {
       offerRetry: offerRetry,
       cloneProblem: cloneProblem,
     );
+    if (backup == null || outcome.summary != 'downloaded') return outcome;
+    return RepoOutcome('downloaded again (old copy in ${backup.split(Platform.pathSeparator).last})');
   }
+
+  /// Moves [dir] to [backup]. Returns null when it worked (or in a dry run),
+  /// else the outcome that stops onboarding.
+  Future<RepoOutcome?> _moveAside(String dir, String backup, String reason) async {
+    _reporter.warn('$dir is $reason. Moving it to $backup and downloading a fresh copy.');
+    if (_dryRun) {
+      _reporter.note('[dry run] would move $dir to $backup');
+      return null;
+    }
+    try {
+      await _entity(dir).rename(backup);
+      return null;
+    } on FileSystemException catch (e) {
+      _reporter.warn("Couldn't move $dir to $backup: ${e.osError?.message ?? e.message}");
+      return const RepoOutcome(
+        'failed',
+        failed: true,
+        hint: 'Close any program using that folder, then run this again.',
+      );
+    }
+  }
+
+  /// The [needs] (paths inside [dir], with `/`) that aren't there.
+  static List<String> _missing(String dir, List<String> needs) => [
+    for (final rel in needs)
+      if (FileSystemEntity.typeSync([dir, ...rel.split('/')].join(Platform.pathSeparator)) ==
+          FileSystemEntityType.notFound)
+        rel,
+  ];
+
+  static String _missingReason(List<String> missing) =>
+      'missing ${missing.join(', ')}, which setup needs (an old or incomplete copy)';
 
   /// Compares repository addresses: lower-case, no scheme (https, ssh, git),
   /// no `user@`, `github.com:` as `github.com/`, no trailing `/` or `.git`.

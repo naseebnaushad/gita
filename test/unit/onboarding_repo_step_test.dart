@@ -109,6 +109,7 @@ void main() {
     Future<bool> Function()? offerRetry,
     String url = _url,
     String? problem,
+    List<String> needs = const [],
   }) => ensurer(dryRun: dryRun).ensure(
     url: url,
     dir: dir,
@@ -120,6 +121,7 @@ void main() {
     clone: clone ?? goodClone,
     offerRetry: offerRetry,
     cloneProblem: () => problem,
+    needs: needs,
   );
 
   setUp(() async {
@@ -394,6 +396,87 @@ void main() {
     final r = await ensure(clone: badClone, offerRetry: () async => false);
     expect(r.summary, 'failed');
     expect(cloneCalls, 1);
+  });
+
+  group('repair: a copy missing files later steps need', () {
+    const needed = 'gita/acme.json';
+    String sep(String rel) => rel.replaceAll('/', Platform.pathSeparator);
+
+    /// The person's copy was made before origin got [needed].
+    Future<void> oldCopy() async {
+      await goodClone();
+      Directory('$seed${Platform.pathSeparator}gita').createSync();
+      await commit(seed, sep(needed), '{}');
+      await git(['-C', seed, 'push', '-q', 'origin', 'HEAD:main']);
+    }
+
+    test('local changes and a needed file missing: moved aside, downloaded again, changes kept', () async {
+      await oldCopy();
+      File('$dir${Platform.pathSeparator}README.md').writeAsStringSync('edited');
+      final r = await ensure(needs: [needed]);
+      expect(r.summary, 'downloaded again (old copy in handbook.backup-20260304-050607)');
+      expect(r.failed, isFalse);
+      expect(File('$dir${Platform.pathSeparator}${sep(needed)}').existsSync(), isTrue);
+      expect(File('$dir${Platform.pathSeparator}README.md').readAsStringSync(), 'first');
+      final backup = '$dir.backup-20260304-050607';
+      expect(File('$backup${Platform.pathSeparator}README.md').readAsStringSync(), 'edited');
+      expect(
+        reporter.warnings.first,
+        '$dir is missing $needed, which setup needs (an old or incomplete copy). '
+        'Moving it to $backup and downloading a fresh copy.',
+      );
+      expect(reporter.lines, contains('note: Your local changes are kept in $backup.'));
+      expect(cloneCalls, 2);
+    });
+
+    test('local changes and every needed file there: kept, as before', () async {
+      await goodClone();
+      File('$dir${Platform.pathSeparator}README.md').writeAsStringSync('edited');
+      final r = await ensure(needs: ['README.md']);
+      expect(r.summary, 'kept (local changes)');
+      expect(backups(), isEmpty);
+      expect(cloneCalls, 1);
+    });
+
+    test('clean old copy that the update fixes: updated, not moved', () async {
+      await oldCopy();
+      final r = await ensure(needs: [needed]);
+      expect(r.summary, 'updated');
+      expect(File('$dir${Platform.pathSeparator}${sep(needed)}').existsSync(), isTrue);
+      expect(backups(), isEmpty);
+      expect(cloneCalls, 1);
+    });
+
+    test('diverged copy missing a needed file: moved aside with its commit, downloaded again', () async {
+      await oldCopy();
+      await commit(dir, 'LOCAL.md', 'mine');
+      final r = await ensure(needs: [needed]);
+      expect(r.summary, 'downloaded again (old copy in handbook.backup-20260304-050607)');
+      expect(File('$dir${Platform.pathSeparator}${sep(needed)}').existsSync(), isTrue);
+      expect(File('$dir.backup-20260304-050607${Platform.pathSeparator}LOCAL.md').existsSync(), isTrue);
+      expect(reporter.lines, contains('note: Anything you changed in it is kept in $dir.backup-20260304-050607.'));
+    });
+
+    test('download fails after the move: failed, the backup stays', () async {
+      await oldCopy();
+      File('$dir${Platform.pathSeparator}README.md').writeAsStringSync('edited');
+      final r = await ensure(needs: [needed], clone: badClone);
+      expect(r.failed, isTrue);
+      expect(backups(), ['handbook.backup-20260304-050607']);
+      expect(FileSystemEntity.typeSync(dir), FileSystemEntityType.notFound);
+    });
+
+    test('dry run: says what it would do, changes nothing', () async {
+      await oldCopy();
+      File('$dir${Platform.pathSeparator}README.md').writeAsStringSync('edited');
+      final calls = cloneCalls;
+      final r = await ensure(needs: [needed], dryRun: true);
+      expect(r.summary, 'dry run');
+      expect(backups(), isEmpty);
+      expect(File('$dir${Platform.pathSeparator}README.md').readAsStringSync(), 'edited');
+      expect(cloneCalls, calls);
+      expect(reporter.lines.where((l) => l.contains('[dry run] would move')), hasLength(1));
+    });
   });
 
   group('dry run changes nothing', () {

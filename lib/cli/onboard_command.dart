@@ -292,6 +292,16 @@ extension _OnboardCommand on GitaCli {
             final a = onboarding.account(s.account);
             final profile = await profileOf(s.account);
             final dir = home(s.dir);
+            // Files later steps take from this copy: one missing means an old or
+            // incomplete copy, which the repo step replaces (so a rerun repairs it).
+            bool inside(String? rel) => rel != null && _insideFolder(p.joinAll([dir, ...rel.split('/')]), dir);
+            final needs = <String>[
+              for (final o in onboarding.steps)
+                if (o is CompanyFileStep && home(o.repoDir) == dir && inside(o.path))
+                  o.path
+                else if (o is RepoScriptStep && home(o.repoDir) == dir)
+                  if (os == HostOs.windows ? o.windows : o.unix case final rel? when inside(rel)) rel,
+            ];
             r.say(s.name);
             final outcome =
                 await RepoEnsurer(
@@ -332,6 +342,7 @@ extension _OnboardCommand on GitaCli {
                     return code == ExitCodes.ok;
                   },
                   cloneProblem: () => lastCloneProblem,
+                  needs: needs,
                   offerRetry: options.skipSignIn || !ask.interactive
                       ? null
                       : () async {
