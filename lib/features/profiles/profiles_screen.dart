@@ -122,7 +122,7 @@ Future<void> showProfileEditor(BuildContext context, Profile? existing) async {
   );
 }
 
-class _ProfileCard extends StatelessWidget {
+class _ProfileCard extends ConsumerWidget {
   const _ProfileCard({
     required this.profile,
     required this.onEdit,
@@ -134,9 +134,10 @@ class _ProfileCard extends StatelessWidget {
   final VoidCallback onDelete;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final color = Color(profile.colorArgb);
+    final rejected = ref.watch(signInHealthProvider(profile.id)).valueOrNull == SignInHealth.rejected;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -183,6 +184,27 @@ class _ProfileCard extends StatelessWidget {
                 ],
               ),
               const Spacer(),
+              if (rejected)
+                Tooltip(
+                  message: 'GitHub cancelled this sign-in, so pushes will fail. '
+                      'Open the profile and press Sign in again.',
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        Icon(Icons.error_outline, size: 14, color: scheme.error),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Sign-in stopped working',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.error),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               Row(
                 children: [
                   Icon(Icons.alternate_email, size: 14, color: scheme.onSurfaceVariant),
@@ -430,9 +452,12 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
               Icon(Icons.check_circle, size: 18, color: scheme.secondary),
               const SizedBox(width: 8),
               Expanded(child: Text('Signed in as @$_githubLogin')),
-              TextButton(
-                onPressed: () => _signIn(flow),
-                child: const Text('Change'),
+              Tooltip(
+                message: 'Sign in again, as this or another GitHub account',
+                child: TextButton(
+                  onPressed: () => _signIn(flow),
+                  child: const Text('Sign in again'),
+                ),
               ),
               TextButton(
                 onPressed: () => setState(() {
@@ -605,6 +630,8 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     } else if (_hadStoredToken) {
       await tokenService.deleteToken(profile.id);
     }
+    // The card asks GitHub again about the new (or removed) sign-in.
+    ref.invalidate(signInHealthProvider(profile.id));
 
     await ref.read(profilesProvider.notifier).upsert(profile);
 

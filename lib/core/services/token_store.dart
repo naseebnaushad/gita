@@ -21,6 +21,14 @@ class TokenStore {
   Future<void> deleteToken(String profileId) =>
       keychain.delete(keyFor(profileId));
 
-  Future<bool> hasToken(String profileId) async =>
-      (await readToken(profileId)) != null;
+  /// Whether a token is saved. A credential store that can't be reached
+  /// (for example `secret-tool` isn't installed) holds no token, so this is
+  /// false rather than an error: setup commands must not crash because of it.
+  Future<bool> hasToken(String profileId) async {
+    try {
+      return (await readToken(profileId)) != null;
+    } on KeychainException {
+      return false;
+    }
+  }
 }

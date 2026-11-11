@@ -25,14 +25,16 @@ class GitHubDeviceFlow {
   /// What a pushed-from token needs: `repo` to push to private repos,
   /// `workflow` so pushes that touch `.github/workflows` aren't rejected,
   /// `read:user`/`user:email` to show who signed in and fill in the
-  /// commit name and email, and `write:public_key` so Gita can add the
-  /// profile's SSH key to the account by itself.
+  /// commit name and email, `write:public_key` so Gita can add the
+  /// profile's SSH key to the account by itself, and `read:org` so
+  /// `gita gh` can run GitHub CLI commands that read organizations and teams.
   static const scopes = [
     'repo',
     'workflow',
     'read:user',
     'user:email',
     'write:public_key',
+    'read:org',
   ];
 
   static final _deviceCodeUri = Uri.parse('https://github.com/login/device/code');

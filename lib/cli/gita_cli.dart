@@ -10,6 +10,12 @@ import '../core/models/doctor_issue.dart';
 import '../core/models/mismatch_report.dart';
 import '../core/models/profile.dart';
 import '../core/models/repo_rule.dart';
+import '../core/onboarding/github_cleanup.dart';
+import '../core/onboarding/old_backups.dart';
+import '../core/onboarding/onboarding_file.dart';
+import '../core/onboarding/repo_step.dart';
+import '../core/onboarding/system.dart';
+import '../core/onboarding/tools.dart';
 import '../core/services/clone_service.dart';
 import '../core/services/company_setup.dart';
 import '../core/services/git_config_sync.dart';
@@ -21,6 +27,7 @@ import '../core/services/identity_doctor_service.dart';
 import '../core/services/machine_scanner.dart';
 import '../core/services/mismatch_detector.dart';
 import '../core/services/path_resolver.dart';
+import '../core/services/path_setup.dart';
 import '../core/services/platform_paths.dart';
 import '../core/services/push_guard.dart';
 import '../core/services/setup_service.dart';
@@ -30,7 +37,9 @@ import '../core/services/token_store.dart';
 import '../core/storage/repositories.dart';
 import 'mcp_server.dart';
 
+part 'gh_command.dart';
 part 'manage_commands.dart';
+part 'onboard_command.dart';
 
 /// Exit codes shared by every command, so hooks and agent integrations can
 /// branch on them without parsing output.
@@ -72,7 +81,17 @@ class GitaCli {
     Future<bool> Function(Uri url)? openBrowser,
     ProcessRunner? runProcess,
     SignInChecker? signInChecker,
+    InteractiveRunner? runInteractive,
+    Map<String, String>? environment,
+    CommandRunner? commandRunner,
+    this.prompter,
+    this.hostOs,
+    PathSetup? pathSetup,
   })  : runProcess = runProcess ?? _defaultRunProcess,
+        runInteractive = runInteractive ?? _defaultRunInteractive,
+        environment = environment ?? Platform.environment,
+        commandRunner = commandRunner ?? const SystemCommandRunner(),
+        pathSetup = pathSetup ?? PathSetup(paths: paths),
         tokenStore = tokenStore ?? TokenStore(),
         // Only the real token store gets the real (network) checker by
         // default, so a caller with its own store, such as a test, never
@@ -89,6 +108,9 @@ class GitaCli {
 
   final StringSink out;
   final StringSink err;
+
+  /// Puts the command on PATH for new terminals (`gita path`).
+  final PathSetup pathSetup;
   final PlatformPaths paths;
   final GitService gitService;
   late final IdentityDoctorService doctorService;
@@ -115,10 +137,26 @@ class GitaCli {
   /// Runs other programs (`gita mcp add-to-claude` runs `claude`).
   final ProcessRunner runProcess;
 
+  /// Runs `gh` for `gita gh`, attached to the terminal.
+  final InteractiveRunner runInteractive;
+
+  /// Environment `gita gh` starts `gh` with (plus `GH_TOKEN`) and searches
+  /// PATH in. Defaults to Gita's own.
+  final Map<String, String> environment;
+
+  /// Runs installers, git and setup scripts for `gita onboard`.
+  final CommandRunner commandRunner;
+
+  /// Asks the questions in `gita onboard`; null means the terminal.
+  final Prompter? prompter;
+
+  /// The system `gita onboard` sets up; null means this one.
+  final HostOs? hostOs;
+
   static Future<ProcessResult> _defaultRunProcess(String executable, List<String> arguments) =>
       Process.run(executable, arguments, runInShell: Platform.isWindows);
 
-  static const version = '0.1.0';
+  static const version = '1.1.1';
 
   ArgParser _buildParser() {
     ArgParser command() => ArgParser()
@@ -134,6 +172,7 @@ class GitaCli {
         command()..addFlag('fix', negatable: false, help: 'Fix what can be fixed without you.'),
       )
       ..addCommand('guard', command())
+      ..addCommand('path', command())
       ..addCommand('profiles', command())
       ..addCommand('scan', command())
       ..addCommand(
@@ -183,6 +222,17 @@ class GitaCli {
           // Used by `gita mcp`: print the code and finish in the background.
           ..addFlag('no-wait', negatable: false, hide: true),
       )
+      ..addCommand(
+        'onboard',
+        command()
+          ..addFlag('dry-run', negatable: false, help: 'Show what would change; change nothing.')
+          ..addFlag('yes', negatable: false, help: 'Answer yes to every question.')
+          ..addFlag('clean', negatable: false, help: 'Remove old GitHub sign-ins without asking.')
+          ..addOption('name', help: 'Your name, shown on commits.')
+          ..addMultiOption('email', help: 'Your email for an account: <account id>=<email>.')
+          ..addFlag('skip-sign-in', negatable: false, help: 'Skip GitHub sign-in (testing).')
+          ..addFlag('skip-repos', negatable: false, help: 'Skip repositories and their files (testing).'),
+      )
       ..addCommand('mcp', command())
       ..addCommand('hook', ArgParser(allowTrailingOptions: false))
       ..addCommand(
@@ -194,6 +244,11 @@ class GitaCli {
   }
 
   Future<int> run(List<String> arguments) async {
+    // Before parsing: everything after `gh` belongs to the GitHub CLI,
+    // including its own --json and --help.
+    if (arguments.isNotEmpty && arguments.first == 'gh') {
+      return _gh(arguments.sublist(1));
+    }
     final parser = _buildParser();
     final ArgResults results;
     try {
@@ -251,6 +306,8 @@ class GitaCli {
         return _rule(command, json: json);
       case 'guard':
         return _guard(command.rest, json: json);
+      case 'path':
+        return _path(command.rest, json: json);
       case 'profiles':
         return _profiles(json: json);
       case 'scan':
@@ -263,6 +320,8 @@ class GitaCli {
         return _company(command, json: json);
       case 'mcp':
         return _mcp(command.rest, json: json);
+      case 'onboard':
+        return _onboardCommand(command);
     }
     return ExitCodes.usage;
   }
@@ -309,6 +368,11 @@ Commands:
                    Take the safety check out again.
   guard status [folder]
                    Say whether the safety check is in place.
+  path [status]    Say whether new terminals find the gita command.
+  path add         Make new terminals find it: adds ~/.gita/bin to PATH in
+                   your shell's startup files (zsh, bash, fish; macOS and
+                   Linux). The app does this once by itself.
+  path remove      Take that out again.
   profiles         List your profiles: email, GitHub account, sign-in,
                    SSH key and folders.
   scan [folder...] Look through this computer's projects for the accounts
@@ -342,6 +406,20 @@ Commands:
                    --force signs in again anyway.
                    --with-token reads a token from stdin instead;
                    --no-browser doesn't open the browser.
+  onboard <file> [--dry-run] [--yes] [--clean] [--name <name>]
+          [--email <account>=<email>]...
+                   Set this computer up from your company's onboarding
+                   file: tools (git, gh, Claude Code), clean-up of old
+                   GitHub sign-ins, a profile and sign-in per account,
+                   repositories and their setup, then "doctor". Safe to
+                   run again: finished steps are skipped.
+  gh [--profile <name or id>] <gh command...>
+                   Run the GitHub CLI (gh) as the account this project
+                   belongs to, for example: gita gh pr create --fill
+                   Gita gives gh that profile's GitHub sign-in for this
+                   one command; gh's own login isn't used or changed.
+                   Everything after "gh" goes to gh, including --json.
+                   Exit code is gh's.
 
 [folder] defaults to the current folder.
 
@@ -787,6 +865,16 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       if (outcome.guardProblem != null) out.writeln('Safety check not added: ${outcome.guardProblem}');
     } else {
       err.writeln(outcome.message);
+      switch (outcome.problem) {
+        case CloneProblem.signIn:
+          err.writeln('To sign in: gita sign-in --profile "${profile.label}"');
+        case CloneProblem.helper:
+          err.writeln('To reinstall it: open the Gita app (it installs the gita command when '
+              'it starts), or run "gita doctor".');
+        case CloneProblem.sshKey || null:
+          break;
+      }
+      if (outcome.gitDetail != null) err.writeln('git said: ${outcome.gitDetail}');
     }
     return outcome.ok ? ExitCodes.ok : ExitCodes.problem;
   }
@@ -1190,6 +1278,60 @@ Exit codes: 0 = all good, 1 = problem found, 2 = couldn't run.
       };
 
   // ---------------------------------------------------------------- guard
+
+  Future<int> _path(List<String> rest, {required bool json}) async {
+    const actions = ['status', 'add', 'remove'];
+    if (rest.length > 1 || (rest.isNotEmpty && !actions.contains(rest.first))) {
+      _fail('Usage: gita path [status|add|remove]', json: json);
+      return ExitCodes.usage;
+    }
+    final action = rest.isEmpty ? 'status' : rest.first;
+    final home = paths.homeDir();
+    String tilde(List<String> files) => [
+          for (final f in files) p.isWithin(home, f) ? '~/${p.relative(f, from: home)}' : f,
+        ].join(', ');
+    final before = pathSetup.status();
+    if (action == 'status' || before.state == PathSetupState.unsupported ||
+        before.state == PathSetupState.providedElsewhere) {
+      final ok = before.state != PathSetupState.notAdded;
+      if (json) {
+        out.writeln(_encode({'ok': ok, ...before.toJson(), 'command': paths.cliPath}));
+      } else {
+        out.writeln(switch (before.state) {
+          PathSetupState.added => 'New terminals find gita (set up in ${tilde(before.files)}).',
+          PathSetupState.notAdded =>
+            'New terminals don\'t find gita yet. Run "${paths.cliPath} path add" to fix that.',
+          _ => before.note!,
+        });
+      }
+      return action == 'status' && !ok ? ExitCodes.problem : ExitCodes.ok;
+    }
+
+    final result = action == 'add' ? await pathSetup.add() : await pathSetup.remove();
+    if (json) {
+      out.writeln(_encode({
+        'ok': result.ok,
+        'changed': result.changed,
+        'files': result.files,
+        if (result.error != null) 'error': result.error,
+        'state': pathSetup.status().state.name,
+      }));
+    } else {
+      if (action == 'add') {
+        out.writeln(result.changed.isEmpty
+            ? 'Already done: new terminals find gita.'
+            : 'Done: added ~/.gita/bin to PATH in ${tilde(result.changed)}.\n'
+                'Open a new terminal window to use "gita".');
+      } else {
+        out.writeln(result.changed.isEmpty
+            ? 'Nothing to take out: Gita had not added itself to PATH.'
+            : 'Done: took Gita out of ${tilde(result.changed)}. '
+                "The app won't add it back.");
+      }
+      if (result.error != null) err.writeln(result.error);
+    }
+    return result.ok ? ExitCodes.ok : ExitCodes.problem;
+  }
 
   Future<int> _guard(List<String> rest, {required bool json}) async {
     const actions = ['install', 'remove', 'status'];

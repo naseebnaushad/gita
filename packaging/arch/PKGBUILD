@@ -1,0 +1,32 @@
+# Maintainer: naseebnaushad <naseebnaushad46@gmail.com>
+#
+# Repackages the Linux build from the GitHub release. CI builds this with
+# the freshly built tarball, desktop file and icon next to this file; for
+# the AUR, run `updpkgsums` so the checksums are filled in.
+pkgname=gita-bin
+pkgver=${GITA_VERSION:-1.1.1}
+pkgrel=1
+pkgdesc='Keeps each git project on the right GitHub account'
+arch=('x86_64')
+url='https://github.com/naseebnaushad/gita'
+license=('MIT')
+depends=('gtk3' 'libsecret')
+provides=('gita')
+conflicts=('gita')
+options=('!strip')
+source=("gita-linux-x64-$pkgver.tar.gz::$url/releases/download/v$pkgver/gita-linux-x64.tar.gz"
+        "gita-$pkgver.desktop::$url/raw/v$pkgver/packaging/linux/gita.desktop"
+        "gita-$pkgver.png::$url/raw/v$pkgver/assets/branding/icon.png"
+        "gita-LICENSE-$pkgver::$url/raw/v$pkgver/LICENSE")
+noextract=("gita-linux-x64-$pkgver.tar.gz")
+sha256sums=('SKIP' 'SKIP' 'SKIP' 'SKIP')
+
+package() {
+  install -d "$pkgdir/opt/gita" "$pkgdir/usr/bin"
+  bsdtar -xf "$srcdir/gita-linux-x64-$pkgver.tar.gz" -C "$pkgdir/opt/gita"
+  ln -s /opt/gita/cli/bin/gita "$pkgdir/usr/bin/gita"
+  ln -s /opt/gita/gita "$pkgdir/usr/bin/gita-app"
+  install -Dm644 "$srcdir/gita-$pkgver.desktop" "$pkgdir/usr/share/applications/gita.desktop"
+  install -Dm644 "$srcdir/gita-LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$srcdir/gita-$pkgver.png" "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/gita.png"
+}

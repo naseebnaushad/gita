@@ -31,6 +31,9 @@ personal and a work account on one computer).
   says, in plain words, and how to fix it (often a tool below, or Gita).
 - To download a project, use gita_clone instead of `git clone`, so it is
   downloaded and kept on the right account.
+- To use the GitHub CLI in a project, run `gita gh <command>` instead of
+  `gh <command>` (for example `gita gh pr create --fill`). It runs gh as
+  the project's account; gh's own login may be a different account.
 - gita_doctor finds setup problems; gita_profiles lists the accounts.
 
 You can also set Gita up and fix it, when the user asks you to. Before a

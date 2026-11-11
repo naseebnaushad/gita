@@ -4,7 +4,7 @@ area: signin
 title: Gita notices when GitHub has cancelled a sign-in, and stops asking you to sign in again for nothing
 authors: [naseebnaushad46]
 branch: feat/sign-in-health
-cr: "v1.1.0 - Change Request (sign-in health)"
+cr: "v1.2.0 - Change Request (sign-in health)"
 after_the_fact: false
 ---
 
@@ -49,7 +49,7 @@ Now Gita asks GitHub whether each saved sign-in still works:
   GitHub in the `Authorization` header, as pushes already do.
 
 ## Tests added and results
-`flutter test`: 273 passed (was 254). `flutter analyze`: no issues.
+`flutter test` (after merging `master`): 429 passed, 24 skipped, 4 failed (the 4 known Windows failures below). `flutter analyze`: no issues.
 
 | ID | Case | Result |
 |---|---|---|
@@ -74,9 +74,25 @@ Now Gita asks GitHub whether each saved sign-in still works:
 | SIGNIN-019 | MCP `gita_sign_in` passes `force` as `--force` | ✅ |
 | SIGNIN-020 | Live (read-only), built `gita.exe doctor` on the dev machine flags the cancelled "ThoughtBox" sign-in | ✅ |
 | SIGNIN-021 | Live, built `gita.exe sign-in --profile AI` on a working sign-in: "Nothing to do" | ✅ |
+| ONBOARD-SIGNIN-001 | `gita onboard` with a cancelled sign-in signs that profile in again (with `--force`) | ✅ |
+| ONBOARD-SIGNIN-002 | `gita onboard` keeps a working sign-in and doesn't start a new one | ✅ |
+| ONBOARD-SIGNIN-003 | `gita onboard` keeps the saved sign-in when GitHub can't be reached | ✅ |
+| GH-SIGNIN-001 | `gita gh` fails with a cancelled sign-in: says why and the one step, keeps gh's exit code, never shows the token | ✅ |
+| GH-SIGNIN-002 | `gita gh` fails with a working sign-in: adds nothing | ✅ |
+| GH-SIGNIN-003 | `gita gh` succeeds: GitHub isn't asked | ✅ |
+| PROFILES-001 | Profiles card shows "Sign-in stopped working" for a cancelled sign-in | ✅ |
+| PROFILES-002 | Card shows nothing extra for a working sign-in | ✅ |
+| PROFILES-003 | Card shows nothing when GitHub can't be asked, or there is no checker | ✅ |
+| PROFILES-004 | A profile without a sign-in doesn't ask GitHub | ✅ |
+| PROFILES-005 | Profile editor: a cancelled sign-in shows the warning and a **Sign in again** button | ✅ |
+| PROFILES-006 | Profile editor: a working sign-in shows "Signed in as @name" | ✅ |
 
-Not tested automatically: the Profiles screen's "Sign in again" row
-(no widget test; checked by reading the code and the analyzer only).
+Known failures that are not from this branch: 4 tests fail on Windows on a
+clean `master` too (`path_resolver_test`: "keeps glob characters after the
+existing part", "returns the input unchanged when the path does not
+exist"; `path_setup_test`: "macOS: .zprofile always…", "an app that ships
+the command installs it and adds it to PATH once"). They fail the same way
+on this branch.
 
 ## Bugs fixed
 - A sign-in cancelled on GitHub showed as "Signed in" and the Doctor said
@@ -85,6 +101,14 @@ Not tested automatically: the Profiles screen's "Sign in again" row
 - A turned-down push told people to "paste a new access token and press
   Save", an option the app no longer leads with. It now points to
   **Sign in with GitHub** and only when that will help.
+- `gita onboard` treated a cancelled sign-in as fine and skipped it, so
+  the new computer still couldn't push. It now signs that profile in again.
+  Its own sign-ins pass `--force`, so "No, that's not my account" can't loop.
+- `gita gh` only showed gh's "Bad credentials". It now says the sign-in was
+  cancelled and the one command that fixes it.
+- Found while testing: the first version of the Profiles card warning
+  overflowed the card by 100 pixels. It now sits on its own line and is
+  shortened with "…" when the card is narrow.
 
 ## Notes for users / upgrade steps
 - If Gita says a sign-in "has stopped working", sign that profile in once
@@ -102,6 +126,7 @@ Not tested automatically: the Profiles screen's "Sign in again" row
 
 ## Suggestions
 - Per-profile SSH as a fallback for HTTPS sign-ins (option D, not approved).
-- A widget test for the Profiles "Sign in again" row.
 - Show in Profiles how many profiles share one GitHub account, since they
   share the 10-sign-in limit.
+- Fix the 4 Windows test failures in `path_resolver_test` and
+  `path_setup_test` (they fail on `master` too).

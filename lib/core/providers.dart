@@ -1,4 +1,6 @@
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -22,6 +24,7 @@ import 'services/hook_service.dart';
 import 'services/identity_doctor_service.dart';
 import 'services/machine_scanner.dart';
 import 'services/mismatch_detector.dart';
+import 'services/path_setup.dart';
 import 'services/platform_paths.dart';
 import 'services/secure_token_service.dart';
 import 'services/setup_service.dart';
@@ -83,6 +86,9 @@ final gitHubSshKeysProvider = Provider((ref) => GitHubSshKeys());
 final cliInstallerProvider =
     Provider((ref) => CliInstaller(paths: ref.watch(platformPathsProvider)));
 
+final pathSetupProvider =
+    Provider((ref) => PathSetup(paths: ref.watch(platformPathsProvider)));
+
 /// Puts the `gita` command this app ships in ~/.gita/bin (or updates it)
 /// and, when that changed anything, rewrites the profiles' git settings so
 /// profiles with a saved GitHub sign-in start using it. Read once at
@@ -98,6 +104,19 @@ Future<CliInstallResult> _installCli(Ref ref) async {
     }
     ref.invalidate(doctorIssuesProvider);
   }
+  // The first time, put the command on PATH for new terminals (macOS and
+  // Linux; the Windows installer does this itself). Only an app that ships
+  // the command does this: not `flutter test`, where nothing is bundled.
+  final ships = result.status != CliInstallStatus.notBundled &&
+      result.status != CliInstallStatus.failed;
+  if (ships && File(ref.read(platformPathsProvider).cliPath).existsSync()) {
+    try {
+      final added = await ref.read(pathSetupProvider).addOnce();
+      if (added != null && !added.ok) debugPrint('Adding gita to PATH: ${added.error}');
+    } catch (e) {
+      debugPrint('Adding gita to PATH failed: $e');
+    }
+  }
   return result;
 }
 
@@ -106,6 +125,21 @@ final gpgServiceProvider = Provider((ref) => const GpgService());
 /// Asks GitHub whether saved sign-ins still work (for the Doctor and the
 /// profile dialog).
 final signInCheckerProvider = Provider<SignInChecker?>((ref) => GitHubSignInChecker());
+
+/// What GitHub says about one profile's saved sign-in (for the Profiles
+/// cards). Unknown when there's no sign-in, no checker, or GitHub can't be
+/// asked, so being offline never shows a problem.
+final signInHealthProvider = FutureProvider.autoDispose.family<SignInHealth, String>((ref, profileId) async {
+  final checker = ref.watch(signInCheckerProvider);
+  if (checker == null) return SignInHealth.unknown;
+  try {
+    final token = await ref.watch(secureTokenServiceProvider).readToken(profileId);
+    if (token == null || token.isEmpty) return SignInHealth.unknown;
+    return (await checker.check(token)).health;
+  } catch (_) {
+    return SignInHealth.unknown;
+  }
+});
 
 final identityDoctorServiceProvider = Provider(
   (ref) => IdentityDoctorService(

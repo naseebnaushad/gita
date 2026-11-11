@@ -2,8 +2,7 @@
 #
 # - Pull requests and pushes to master: tests + the three builds. The
 #   built apps can be downloaded from the run's "Artifacts" section.
-# - A tag like v1.2.0: the same, then a draft GitHub release with the
-#   three downloads attached. Check it and press "Publish".
+# - Releases: see release.yml, which calls this workflow on a v* tag.
 # - "Run workflow" on the Actions tab: the same as a pull request.
 #
 # Each build includes the `gita` command (in a `cli` folder inside the
@@ -14,8 +13,8 @@ on:
   pull_request:
   push:
     branches: [master]
-    tags: ['v*']
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -48,9 +47,29 @@ jobs:
           git config --global init.defaultBranch main
           flutter test
 
+  test-macos:
+    name: Tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: flutter test
+        run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.com"
+          git config --global init.defaultBranch main
+          # GITA_TEST_KEYCHAIN also runs the test that round-trips a secret
+          # through the real login Keychain.
+          GITA_TEST_KEYCHAIN=1 flutter test
+
   build:
     name: Build (${{ matrix.name }})
-    needs: test
+    needs: [test, test-macos]
     strategy:
       fail-fast: false
       matrix:
@@ -80,10 +99,16 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libgtk-3-dev libsecret-1-dev libjsoncpp-dev
+          sudo apt-get install -y ninja-build libgtk-3-dev libsecret-1-dev libsecret-tools libjsoncpp-dev
 
       - run: flutter pub get
       - run: flutter build ${{ matrix.target }} --release
+
+      - name: Version
+        id: ver
+        shell: bash
+        run: |
+          echo "version=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)" >> "$GITHUB_OUTPUT"
 
       - name: Package (Windows)
         if: matrix.target == 'windows'
@@ -92,47 +117,104 @@ jobs:
           $app = "build/windows/x64/runner/Release"
           & "$app/cli/bin/gita.exe" --version
           if ($LASTEXITCODE -ne 0) { throw "The bundled gita command doesn't run." }
-          Compress-Archive -Path "$app/*" -DestinationPath "${{ matrix.asset }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "$app/*" -DestinationPath "dist/${{ matrix.asset }}"
+          # Installer (.exe) made with Inno Setup.
+          choco install innosetup --no-progress -y
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" "/DSourceDir=$((Resolve-Path $app).Path)" packaging/windows/gita.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed." }
 
       - name: Package (macOS)
         if: matrix.target == 'macos'
         run: |
           app="build/macos/Build/Products/Release/gita.app"
-          "$app/Contents/Resources/cli/bin/gita" --version
+          cli="$app/Contents/Resources/cli/bin/gita"
+          # A hardened-runtime Dart AOT binary signed without
+          # Cli.entitlements is SIGKILLed at launch (exit 137).
+          set +e
+          "$cli" --version
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            if [ "$status" -ge 128 ]; then
+              echo "::error::The bundled gita command was killed by signal $((status - 128)) (exit $status). Check its code signature and entitlements (macos/Runner/Cli.entitlements)."
+            else
+              echo "::error::The bundled gita command doesn't run (exit $status)."
+            fi
+            codesign -d --entitlements - "$cli" || true
+            exit 1
+          fi
+          codesign -d --entitlements - "$cli" 2>&1 | grep -q allow-unsigned-executable-memory \
+            || { echo "::error::The bundled gita command is missing the allow-unsigned-executable-memory entitlement."; exit 1; }
           codesign --verify --deep --strict "$app"
-          ditto -c -k --keepParent "$app" "${{ matrix.asset }}"
+          scripts/smoke_cli.sh "$app/Contents/Resources/cli/bin/gita"
+          mkdir -p dist
+          ditto -c -k --keepParent "$app" "dist/${{ matrix.asset }}"
+          # Disk image with an Applications shortcut to drag the app onto.
+          stage=$(mktemp -d)
+          cp -R "$app" "$stage/Gita.app"
+          ln -s /Applications "$stage/Applications"
+          hdiutil create -volname "Gita" -srcfolder "$stage" -ov -format UDZO "dist/gita-macos.dmg"
 
       - name: Package (Linux)
         if: matrix.target == 'linux'
         run: |
           bundle="build/linux/x64/release/bundle"
           "$bundle/cli/bin/gita" --version
-          tar -czf "${{ matrix.asset }}" -C "$bundle" .
+          scripts/smoke_cli.sh "$bundle/cli/bin/gita"
+          mkdir -p dist
+          tar -czf "dist/${{ matrix.asset }}" -C "$bundle" .
+          # .deb and .rpm
+          sudo apt-get install -y rpm ruby
+          sudo gem install --no-document fpm
+          packaging/linux/package.sh deb "$bundle" "${{ steps.ver.outputs.version }}" dist
+          packaging/linux/package.sh rpm "$bundle" "${{ steps.ver.outputs.version }}" dist
+          # The .deb installs and the installed command runs.
+          sudo apt-get install -y ./dist/*.deb
+          gita --version
+          rpm -qlp dist/*.rpm | head -20
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          name: ${{ matrix.target }}
+          path: dist/*
           if-no-files-found: error
 
-  release:
-    name: Draft release
-    if: startsWith(github.ref, 'refs/tags/v')
+  arch:
+    name: Package (Arch Linux)
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    container: archlinux:latest
     steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm base-devel git sudo
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          path: dist
-          merge-multiple: true
-      - name: Create a draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
+          name: linux
+          path: linux
+      - name: Build the package
         run: |
-          ls -l dist
-          gh release create "${{ github.ref_name }}" dist/* \
-            --repo "${{ github.repository }}" \
-            --draft --generate-notes \
-            --title "Gita ${{ github.ref_name }}"
+          version=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)
+          useradd -m builder
+          work=/home/builder/pkg
+          mkdir -p "$work"
+          cp packaging/arch/PKGBUILD "$work/"
+          # Use the build from this run instead of downloading a release.
+          cp linux/gita-linux-x64.tar.gz "$work/gita-linux-x64-$version.tar.gz"
+          cp packaging/linux/gita.desktop "$work/gita-$version.desktop"
+          cp assets/branding/icon.png "$work/gita-$version.png"
+          cp LICENSE "$work/gita-LICENSE-$version"
+          chown -R builder "$work"
+          cd "$work"
+          sudo -u builder env GITA_VERSION="$version" makepkg --noconfirm --nodeps
+          pacman -U --noconfirm ./*.pkg.tar.zst
+          gita --version
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp ./*.pkg.tar.zst "$GITHUB_WORKSPACE/dist/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error

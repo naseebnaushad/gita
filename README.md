@@ -114,17 +114,34 @@ gita doctor            # find setup problems before they break a commit or push
 gita doctor --fix      # ...and fix the ones that need no person (rules to deleted profiles, company orgs)
 gita profiles          # list profiles: email, GitHub account, sign-in, SSH key, folders
 gita sign-in --profile <name>   # sign a profile in to GitHub (shows a code to enter)
+gita gh [--profile <name>] <gh command...>   # run the GitHub CLI (gh) as this project's account
 gita company import <file> [--profile <name>]   # use the company's setup file
 gita company list      # company setups on this computer
+gita onboard <file> [--dry-run] [--yes] [--clean] [--name <name>] [--email <account>=<email>]...
+                       # set a new computer up from the company's onboarding file (see docs/onboarding.md)
 gita guard install [folder]   # add the safety check to a project (the app does this for you)
 gita guard remove [folder]    # take it out again
 gita guard status [folder]    # is it in place?
 gita mcp add-to-claude        # let Claude Code ask Gita (see below)
+gita path [status|add|remove] # whether new terminals find the gita command
 ```
 
-Add `--json` to any command for machine-readable output. Exit codes:
+**Typing `gita` in a terminal.** The command lives in `~/.gita/bin`. On
+macOS and Linux the app puts that folder on your PATH the first time it
+starts, by adding a short block marked `# >>> gita >>>` to your shell's
+startup file: `~/.zprofile` for zsh on a Mac, `~/.profile` (or
+`~/.bash_profile`) on Linux, plus `~/.bashrc`, `~/.zshrc` and fish's
+`conf.d/gita.fish` when you use those. Open a new terminal window after
+that. The block adds `~/.gita/bin` at the end of PATH, so another program
+called `gita` you already have keeps working. `gita path remove` takes it
+out again, and the app won't put it back; `gita path add` adds it
+yourself. On Windows the installer offers this instead, and the Linux
+packages (.deb, .rpm, Arch) put `gita` in `/usr/bin`.
+
+Add `--json` to any command for machine-readable output (except
+`gita gh`, which passes `--json` on to `gh`). Exit codes:
 `0` all good, `1` problem found, `2` couldn't run (bad arguments, or not a
-git project).
+git project). `gita gh` exits with `gh`'s own code once `gh` has started.
 
 Build it with:
 
@@ -258,6 +275,10 @@ setup can be automated:
 | `gita_guard` | Add, remove or check the safety check in a project. |
 | `gita_doctor` with `fix` | Fix the setup problems that need no person. |
 
+For the GitHub CLI, agents are told to run `gita gh <command>` instead of
+`gh <command>` (see [the GitHub CLI section](#the-github-cli-gh-with-the-right-account)).
+There is deliberately no MCP tool that runs `gh` or hands out a token.
+
 Each tool is marked as read-only or not, so Claude Code asks you before
 using one that changes something. Agents are told to say what a tool will
 change before they use it. Gita can't remove a profile from these tools;
@@ -303,6 +324,12 @@ also makes a draft release with the three downloads; check it, then press
 The macOS build is signed ad hoc (fine for trying it; macOS asks to
 confirm on first open: right-click -> **Open**). To hand it to many
 people, sign and notarize it with an Apple Developer ID.
+
+The app itself is universal (Apple silicon and Intel), but the bundled
+`gita` command is built by `dart build cli`, which only builds for the
+machine it runs on. The release is built on an Apple silicon runner, so on
+Intel Macs the app opens but the `gita` command (credential helper, MCP
+server) doesn't run.
 
 ### The safety check: wrong-account commits and pushes are stopped
 
@@ -364,22 +391,17 @@ how to replace it. Doctor (in the app and `gita doctor`) warns about
 profiles with no token, and about tokens saved while the `gita` command is
 not installed yet.
 
-Gita installs the command by itself. Windows and Linux builds of the app
-carry a copy in a `cli` folder next to the app, and every time Gita starts
+Gita installs the command by itself. The app carries a copy (in a `cli`
+folder next to the app on Windows and Linux, and in
+`Gita.app/Contents/Resources/cli` on macOS), and every time Gita starts
 it copies that to `~/.gita/bin` if it is missing or out of date, then
 rewrites the profiles' git settings so saved sign-ins start working.
 Nobody has to install anything by hand.
 
 The build does this through a step at the end of `windows/CMakeLists.txt`
-and `linux/CMakeLists.txt`, which runs `dart build cli` (about 5 seconds).
-macOS builds don't include it yet; on a Mac, install it by hand:
-
-```
-dart build cli
-mkdir -p ~/.gita/bin && cp build/cli/*/bundle/bin/gita ~/.gita/bin/
-```
-
-then open each profile in Gita and press Save again.
+and `linux/CMakeLists.txt`, and a build phase that runs
+`macos/scripts/bundle_cli.sh`; each runs `dart build cli` (about 5
+seconds).
 
 #### Signing in from the command line
 
@@ -415,6 +437,45 @@ If GitHub refuses the token, nothing is saved and the command says so. If
 the account's main email isn't the one the profile commits with, the
 command points that out, because GitHub then won't link the commits to the
 account unless that email is added to it.
+
+### The GitHub CLI (`gh`) with the right account
+
+`gh` remembers one login for the whole computer, so `gh pr create` in a
+personal project acts as your work account if that is who `gh` is signed
+in as. Prefix it with `gita`:
+
+```
+gita gh pr create --fill
+gita gh pr list --json number,title
+gita gh --profile Personal repo create my-thing --private
+```
+
+`gita gh` works out the project's profile the same way pushes do (folder
+rules, then GitHub account/organization rules matched against the
+project's remote), reads that profile's GitHub sign-in from the computer's
+password store, and runs `gh` with it in `GH_TOKEN`, for that one command
+only. `gh`'s own login is neither used nor changed, so there is nothing to
+`gh auth switch`. Everything after `gh` goes to `gh` unchanged, and the
+exit code is `gh`'s.
+
+- `--profile <name or id>` (before the `gh` command) picks the profile
+  yourself; you need it outside a git project.
+- If no rule covers the project, it stops (exit 2) and asks for
+  `--profile` rather than guessing.
+- If the profile isn't signed in, it says to run `gita sign-in --profile
+  <name>` (exit 1).
+- If `gh` isn't installed it says how to get it (https://cli.github.com).
+  You don't need to run `gh auth login`.
+- Gita never shows the sign-in: `gita gh auth token` and `gita gh auth
+  status --show-token` are refused. `gita gh auth status` shows which
+  account `gh` is using.
+- `GITHUB_TOKEN` from your shell is not passed to `gh`, so a token for
+  another account can't slip in.
+
+Only github.com is covered, like Gita's sign-in.
+
+To make plain `gh` always go through Gita, add an alias to your shell
+profile: `alias gh='gita gh'`.
 
 ### SSH pushes with the right account
 
@@ -459,8 +520,12 @@ in from the GitHub account.
 
 The token asks for `repo` (push to private repos), `workflow` (push
 changes to `.github/workflows`), `read:user` and `user:email` (to show
-the account and fill in the email), and `write:public_key` (to add the
-profile's SSH key to the account).
+the account and fill in the email), `write:public_key` (to add the
+profile's SSH key to the account), and `read:org` (so `gita gh` can run
+GitHub CLI commands that read organizations and teams). Profiles signed
+in before Gita asked for `read:org` keep working for git and most `gh`
+commands; if an organization or team command fails with a permissions
+error, sign the profile in again.
 
 #### When a sign-in stops working
 
@@ -522,3 +587,7 @@ there automatically the first time the app reads them.
 Gita stores its own state (profiles, rules, tracked repos) as flat JSON under
 `~/.gita/`, plus one generated `.gitconfig` fragment per profile. It never
 hand-edits your `~/.gitconfig` outside a clearly delimited managed block.
+
+## License
+
+[MIT](LICENSE) © 2026 naseebnaushad

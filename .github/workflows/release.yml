@@ -1,0 +1,69 @@
+# Releases Gita. Push a tag like v1.2.0 and this workflow:
+#   1. checks the tag matches the version in pubspec.yaml,
+#   2. runs the tests and builds for Windows, macOS and Linux (build.yml),
+#   3. creates a GitHub release with the three downloads attached.
+#
+#   git tag v1.2.0 && git push origin v1.2.0
+#
+# Tags with a suffix (v1.2.0-beta.1) are marked as pre-releases.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    name: Check version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches pubspec.yaml
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pubspec=$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' pubspec.yaml)
+          echo "tag=$tag pubspec=$pubspec"
+          cli=$(sed -n "s/.*static const version = '\([^']*\)'.*/\1/p" lib/cli/gita_cli.dart)
+          echo "cli=$cli"
+          if [ "$tag" != "$cli" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the gita command version $cli (lib/cli/gita_cli.dart)."
+            exit 1
+          fi
+          if [ "$tag" != "$pubspec" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match pubspec.yaml version $pubspec. Bump the version first."
+            exit 1
+          fi
+
+  build:
+    name: Build
+    needs: check-version
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          # Checksums for installers that download a release: they pin a
+          # version and its SHA-256, and a bot checks new releases against this.
+          (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+          flags=""
+          case "$TAG" in *-*) flags="--prerelease" ;; esac
+          gh release create "$TAG" dist/* \
+            --repo "${{ github.repository }}" \
+            --generate-notes --title "Gita $TAG" $flags
