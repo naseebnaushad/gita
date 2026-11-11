@@ -255,6 +255,7 @@ with every release since 1.1.0 (PR #27), so scripts that pin a version can check
 | 2026-11-09 | #28, 1.1.0 | Version bump and release 1.1.0 with `gita onboard` (10:44 UTC) |
 | 2026-11-09 | #29 | Windows: `gita onboard` starts Windows PowerShell 5.1 (Claude Code installer, setup scripts) without PowerShell 7's `PSModulePath`, which stopped the installer with "Get-FileHash is not recognized". Found by a company installer's CI on `windows-latest` |
 | 2026-11-09 | #30, 1.1.1 | Version bump and release 1.1.1 with #29 (11:17 UTC, Latest) |
+| 2026-11-10 | #31 | `gita onboard` rerun repairs an old or incomplete company repository copy (moved to `<folder>.backup-<date>`, downloaded again); merged 09:54 UTC, not released yet (planned 1.1.2) |
 
 Used by: a company setup script pinned 1.1.1 the same day. Its first real Windows run
 worked through every Gita step; the company's own setup script then could not find
