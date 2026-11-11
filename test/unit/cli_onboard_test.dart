@@ -6,11 +6,15 @@ import 'package:gita/cli/gita_cli.dart';
 import 'package:gita/core/onboarding/system.dart';
 import 'package:gita/core/onboarding/tools.dart';
 import 'package:gita/core/services/git_service.dart';
+import 'package:gita/core/services/github_device_flow.dart';
 import 'package:gita/core/services/keychain_store.dart';
 import 'package:gita/core/services/platform_paths.dart';
+import 'package:gita/core/services/sign_in_checker.dart';
 import 'package:gita/core/services/token_store.dart';
 import 'package:gita/core/storage/repositories.dart';
 import 'package:path/path.dart' as p;
+
+import '../support/fake_github.dart';
 
 /// Real git (isolated config), real Gita storage in a temp home, real clone
 /// from a local "GitHub" repo; gh, Claude Code and Windows tools are fakes.
@@ -60,6 +64,19 @@ class _Quiet implements Prompter {
   Future<bool> confirm(String question, {required bool defaultYes}) async => defaultYes;
 }
 
+/// Answers sign-in checks from a script, per token.
+class _Checker implements SignInChecker {
+  _Checker(this.answers);
+  final Map<String, SignInCheck> answers;
+  final asked = <String>[];
+
+  @override
+  Future<SignInCheck> check(String token) async {
+    asked.add(token);
+    return answers[token] ?? SignInCheck.unknown;
+  }
+}
+
 void main() {
   late Directory home;
   late Directory tmp;
@@ -104,8 +121,11 @@ void main() {
     ],
   };
 
-  Future<int> onboard(List<String> extra) => GitaCli(
+  Future<int> onboard(List<String> extra, {SignInChecker? checker, FakeGitHub? github}) => GitaCli(
     out: out,
+    signInChecker: checker,
+    deviceFlow: github == null ? null : GitHubDeviceFlow(clientId: 'Ov23liTEST', http: github, delay: (_) async {}),
+    openBrowser: (_) async => true,
     err: err,
     paths: paths,
     gitService: git,
@@ -216,6 +236,94 @@ void main() {
       (d) => p.basename(d.path).startsWith('handbook.backup-'),
     );
     expect(File(p.join(backup.path, 'notes.txt')).readAsStringSync(), 'mine');
+  });
+
+  group('sign-in step', () {
+    // One account and one sign-in step, so only the sign-in is exercised.
+    setUp(() {
+      File(onboardingPath).writeAsStringSync(
+        jsonEncode({
+          'format': 1,
+          'name': 'Example Co',
+          'accounts': [
+            {'id': 'work', 'label': 'Example', 'emailDomain': 'example.com'},
+          ],
+          'steps': [
+            {'type': 'signIn', 'account': 'work'},
+          ],
+        }),
+      );
+    });
+    const workAnswers = ['--name', 'Dev Example', '--email', 'work=dev@example.com', '--yes'];
+
+    Future<String> savedSignIn(String token, {String? login}) async {
+      // A first run with no sign-in makes the profile.
+      expect(await onboard([...workAnswers, '--skip-sign-in']), ExitCodes.ok, reason: '$out$err');
+      final repo = ProfileRepository(paths: paths);
+      final profile = (await repo.getAll()).single;
+      if (login != null) await repo.upsert(profile.copyWith(githubLogin: login));
+      await tokens.saveToken(profile.id, token);
+      out.clear();
+      err.clear();
+      return profile.id;
+    }
+
+    test('a sign-in GitHub cancelled is signed in again', () async {
+      final id = await savedSignIn('gho_dead', login: 'dev-work');
+      final github = FakeGitHub(
+        tokenAnswers: [
+          {'access_token': 'gho_new', 'token_type': 'bearer'},
+        ],
+        user: {'login': 'dev-work'},
+      );
+      final checker = _Checker({'gho_dead': SignInCheck.rejected});
+
+      final code = await onboard(workAnswers, checker: checker, github: github);
+      final text = '$out$err';
+
+      expect(code, ExitCodes.ok, reason: text);
+      expect(
+        text,
+        contains(
+          '"Example"'
+          "'s GitHub sign-in has stopped working",
+        ),
+      );
+      expect(text, contains('signed in as @dev-work'));
+      expect(await tokens.readToken(id), 'gho_new');
+      expect(checker.asked, ['gho_dead'], reason: 'the new sign-in is forced, not checked again');
+      expect(text, isNot(contains('gho_dead')));
+      expect(text, isNot(contains('gho_new')));
+    });
+
+    test('a working sign-in is kept, with no new sign-in', () async {
+      final id = await savedSignIn('gho_ok', login: 'dev-work');
+      final github = FakeGitHub();
+
+      final code = await onboard(
+        workAnswers,
+        checker: _Checker({'gho_ok': const SignInCheck.working('dev-work')}),
+        github: github,
+      );
+      final text = '$out$err';
+
+      expect(code, ExitCodes.ok, reason: text);
+      expect(text, contains('"Example" is signed in as @dev-work.'));
+      expect(text, isNot(contains('stopped working')));
+      expect(github.posts, isEmpty, reason: 'no sign-in was started');
+      expect(await tokens.readToken(id), 'gho_ok');
+    });
+
+    test('GitHub out of reach keeps the saved sign-in', () async {
+      final id = await savedSignIn('gho_x', login: 'dev-work');
+      final github = FakeGitHub();
+
+      final code = await onboard(workAnswers, checker: _Checker({}), github: github);
+
+      expect(code, ExitCodes.ok, reason: '$out$err');
+      expect(github.posts, isEmpty);
+      expect(await tokens.readToken(id), 'gho_x');
+    });
   });
 
   test('a dry run changes nothing', () async {
