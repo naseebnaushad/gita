@@ -419,7 +419,14 @@ gita sign-in --profile Work
    on HTTPS pushes for the profile's folders.
 
 `--profile` takes the profile's name or id (`gita profiles` lists them).
-`--no-browser` only prints the steps. To use a token you already have
+`--no-browser` only prints the steps.
+
+If the profile is already signed in and GitHub still accepts that sign-in
+for the profile's account, the command changes nothing and says so. Add
+`--force` to sign in again anyway (for example to switch accounts). This
+matters because GitHub keeps only the 10 newest sign-ins per account for
+Gita: every extra one can cancel an older one that another computer, or
+another profile signed in as the same account, still uses. To use a token you already have
 instead, pipe it in:
 
 ```
@@ -519,6 +526,28 @@ GitHub CLI commands that read organizations and teams). Profiles signed
 in before Gita asked for `read:org` keep working for git and most `gh`
 commands; if an organization or team command fails with a permissions
 error, sign the profile in again.
+
+#### When a sign-in stops working
+
+GitHub can cancel a saved sign-in: when someone revokes it on GitHub, when
+the OAuth app's access is removed, or when the account signs in to Gita
+more than 10 times (GitHub then drops the oldest). Gita checks each saved
+sign-in with GitHub (a quick "who is this?" request, never showing the
+token):
+
+- **Profiles** shows "sign-in stopped working" with a **Sign in again**
+  button instead of "Signed in as @name".
+- **Doctor** (and `gita doctor`) reports it as a problem with a
+  **Sign in** fix. It also warns when a sign-in belongs to a different
+  GitHub account than the profile names.
+- When a push is turned down, git asks Gita to forget the sign-in. Gita
+  keeps it and prints what went wrong: the sign-in was cancelled (sign in
+  again once), it's for the wrong account, or it works but that account
+  can't open the project (signing in again won't help; check access or
+  `gita which`).
+
+If GitHub can't be reached, Gita says nothing rather than send people to
+sign in again for no reason.
 
 Gita signs in through its own GitHub OAuth app, "Gita"
 (client ID `Ov23licOLgsWLhLzch9w`, built in, nothing to set up). On

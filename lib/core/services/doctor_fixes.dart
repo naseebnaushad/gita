@@ -49,7 +49,9 @@ List<DoctorFix> fixesFor(DoctorIssue issue) => switch (issue.category) {
   ],
   DoctorCategory.orphanedSshKeyReference => const [DoctorFix.unlinkSshKey],
   DoctorCategory.orphanedRuleProfile => const [DoctorFix.deleteRule],
-  DoctorCategory.missingPushToken => const [DoctorFix.signIn],
+  DoctorCategory.missingPushToken ||
+  DoctorCategory.signInRejected ||
+  DoctorCategory.signInWrongAccount => const [DoctorFix.signIn],
   DoctorCategory.credentialHelperNotInstalled => const [DoctorFix.installCli],
   DoctorCategory.keychainUnavailable => const [],
   DoctorCategory.companyNoProfile => const [],

@@ -131,7 +131,16 @@ extension _GhCommand on GitaCli {
       'GH_TOKEN': token,
     };
     try {
-      return await runInteractive(executable, ghArgs, environment: env, workingDirectory: cwd);
+      final code = await runInteractive(executable, ghArgs, environment: env, workingDirectory: cwd);
+      // gh only says "Bad credentials"; say why, and the one step that fixes it.
+      if (code != 0 && signInChecker != null && (await signInChecker!.check(token)).health == SignInHealth.rejected) {
+        err.writeln(
+          'Gita: "${profile.label}"\'s GitHub sign-in has stopped working: GitHub '
+          'no longer accepts it (it may have been cancelled on GitHub). Sign it in '
+          'again once: gita sign-in --profile ${GitaCli._quoteArg(profile.label)}',
+        );
+      }
+      return code;
     } on ProcessException catch (e) {
       err.writeln("Couldn't start gh ($executable): ${e.message}. $_installHint");
       return ExitCodes.problem;

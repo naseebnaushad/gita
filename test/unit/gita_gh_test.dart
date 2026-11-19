@@ -8,8 +8,10 @@ import 'package:gita/core/services/git_service.dart';
 import 'package:gita/core/services/keychain_store.dart';
 import 'package:gita/core/services/path_resolver.dart';
 import 'package:gita/core/services/platform_paths.dart';
+import 'package:gita/core/services/sign_in_checker.dart';
 import 'package:gita/core/services/token_store.dart';
 import 'package:gita/core/storage/repositories.dart';
+import 'package:path/path.dart' as p;
 
 /// `gita gh`: runs a fake `gh` (a shell script on a temp PATH) so no real
 /// GitHub CLI, account or token is involved. The fake says which test
@@ -79,28 +81,30 @@ exit ${FAKE_GH_EXIT:-0}
   }
 
   Map<String, String> envWithFakeGh({Map<String, String> extra = const {}}) => {
-        'PATH': '${bin.path}:/usr/bin:/bin',
-        'HOME': home.path,
-        'GITHUB_TOKEN': 'some-other-token',
-        ...extra,
-      };
+    'PATH': '${bin.path}:/usr/bin:/bin',
+    'HOME': home.path,
+    'GITHUB_TOKEN': 'some-other-token',
+    ...extra,
+  };
 
   Future<int> run(
     List<String> args, {
     String? cwd,
     Map<String, String>? environment,
     bool realRunner = false,
-  }) =>
-      GitaCli(
-        out: out,
-        err: err,
-        paths: paths,
-        gitService: git,
-        tokenStore: tokens,
-        cwd: cwd ?? repoPath,
-        environment: environment ?? envWithFakeGh(),
-        runInteractive: realRunner ? null : capture,
-      ).run(args);
+    SignInChecker? checker,
+    InteractiveRunner? runner,
+  }) => GitaCli(
+    signInChecker: checker,
+    out: out,
+    err: err,
+    paths: paths,
+    gitService: git,
+    tokenStore: tokens,
+    cwd: cwd ?? repoPath,
+    environment: environment ?? envWithFakeGh(),
+    runInteractive: realRunner ? null : (runner ?? capture),
+  ).run(args);
 
   Future<void> addProfiles() async {
     final repo = ProfileRepository(paths: paths);
@@ -110,27 +114,26 @@ exit ${FAKE_GH_EXIT:-0}
 
   Future<void> addRule(RepoRule rule) => RepoRuleRepository(paths: paths).upsert(rule);
 
-  RepoRule folderRuleFor(Profile profile) => RepoRule(
-        id: 'folder-${profile.id}',
-        pathPattern: resolveRepoPath(workspace.path),
-        profileId: profile.id,
-      );
+  RepoRule folderRuleFor(Profile profile) =>
+      RepoRule(id: 'folder-${profile.id}', pathPattern: resolveRepoPath(workspace.path), profileId: profile.id);
 
   setUp(() async {
     home = await Directory.systemTemp.createTemp('gita_gh_home_');
     workspace = await Directory.systemTemp.createTemp('gita_gh_ws_');
     bin = await Directory.systemTemp.createTemp('gita_gh_bin_');
     paths = PlatformPaths(overrideHomeDir: home.path);
-    git = GitService(environmentOverride: {
-      'GIT_CONFIG_GLOBAL': paths.gitConfigPath,
-      'GIT_CONFIG_SYSTEM': '${home.path}/gitconfig_system',
-    });
+    git = GitService(
+      environmentOverride: {
+        'GIT_CONFIG_GLOBAL': paths.gitConfigPath,
+        'GIT_CONFIG_SYSTEM': '${home.path}/gitconfig_system',
+      },
+    );
     final repo = Directory('${workspace.path}/project')..createSync();
     repoPath = repo.path;
     expect((await Process.run('git', ['init'], workingDirectory: repoPath)).exitCode, 0);
 
     final gh = File('${bin.path}/gh')..writeAsStringSync(fakeGh);
-    expect((await Process.run('chmod', ['755', gh.path])).exitCode, 0);
+    if (!Platform.isWindows) expect((await Process.run('chmod', ['755', gh.path])).exitCode, 0);
 
     out = StringBuffer();
     err = StringBuffer();
@@ -150,6 +153,76 @@ exit ${FAKE_GH_EXIT:-0}
     expect(all, isNot(contains(workToken)));
     expect(all, isNot(contains(personalToken)));
   }
+
+  group('gita gh, when gh fails', () {
+    // gh never runs here, so a placeholder file on PATH is enough on any system.
+    Map<String, String> ghOnPath() {
+      File(p.join(bin.path, Platform.isWindows ? 'gh.exe' : 'gh')).writeAsStringSync('');
+      if (!Platform.isWindows) Process.runSync('chmod', ['755', p.join(bin.path, 'gh')]);
+      return {'PATH': bin.path, 'HOME': home.path};
+    }
+
+    Future<int> failing(
+      String program,
+      List<String> args, {
+      required Map<String, String> environment,
+      required String workingDirectory,
+    }) async => 1;
+
+    test('a sign-in GitHub cancelled says so, with the one step that fixes it', () async {
+      await addProfiles();
+      await addRule(folderRuleFor(work));
+
+      final code = await run(
+        ['gh', 'pr', 'list'],
+        checker: _Checker({workToken: SignInCheck.rejected}),
+        runner: failing,
+        environment: ghOnPath(),
+      );
+
+      expect(code, 1, reason: "gh's exit code is kept");
+      expect(
+        err.toString(),
+        contains(
+          '"Work"'
+          "'s GitHub sign-in has stopped working",
+        ),
+      );
+      expect(err.toString(), contains('gita sign-in --profile Work'));
+      expect(out.toString(), isEmpty);
+      expectNoTokenShown();
+    });
+
+    test('a working sign-in adds nothing to what gh said', () async {
+      await addProfiles();
+      await addRule(folderRuleFor(work));
+
+      final code = await run(
+        ['gh', 'pr', 'list'],
+        checker: _Checker({workToken: const SignInCheck.working('dev-work')}),
+        runner: failing,
+        environment: ghOnPath(),
+      );
+
+      expect(code, 1);
+      expect(err.toString(), isNot(contains('stopped working')));
+    });
+
+    test('GitHub is not asked when gh succeeds', () async {
+      await addProfiles();
+      await addRule(folderRuleFor(work));
+      final checker = _Checker({});
+
+      await run(
+        ['gh', 'pr', 'list'],
+        checker: checker,
+        runner: (a, b, {required environment, required workingDirectory}) async => 0,
+        environment: ghOnPath(),
+      );
+
+      expect(checker.asked, isEmpty);
+    });
+  });
 
   group('gita gh', skip: Platform.isWindows ? 'uses a shell script as gh' : null, () {
     test('runs gh as the profile of the folder rule, in the project', () async {
@@ -362,4 +435,17 @@ class _BrokenKeychain implements KeychainStore {
 
   @override
   Future<void> delete(String key) async => throw KeychainException('locked');
+}
+
+/// Answers sign-in checks from a script, per token.
+class _Checker implements SignInChecker {
+  _Checker(this.answers);
+  final Map<String, SignInCheck> answers;
+  final asked = <String>[];
+
+  @override
+  Future<SignInCheck> check(String token) async {
+    asked.add(token);
+    return answers[token] ?? SignInCheck.unknown;
+  }
 }

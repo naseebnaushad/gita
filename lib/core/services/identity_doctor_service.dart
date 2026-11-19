@@ -9,6 +9,7 @@ import 'company_setup.dart';
 import 'gpg_service.dart';
 import 'keychain_store.dart';
 import 'platform_paths.dart';
+import 'sign_in_checker.dart';
 import 'token_store.dart';
 
 /// Scans profiles/rules/SSH keys for config drift that won't show up until
@@ -21,6 +22,7 @@ class IdentityDoctorService {
     this.gpgService = const GpgService(),
     this.paths = const PlatformPaths(),
     this.tokenStore,
+    this.signInChecker,
   });
 
   final GpgService gpgService;
@@ -28,6 +30,10 @@ class IdentityDoctorService {
 
   /// Where profile tokens live. Null skips the HTTPS sign-in checks.
   final TokenStore? tokenStore;
+
+  /// Asks GitHub whether each saved sign-in still works. Null skips that
+  /// check (it needs the internet).
+  final SignInChecker? signInChecker;
 
   Future<List<DoctorIssue>> run({
     required List<Profile> profiles,
@@ -200,6 +206,11 @@ class IdentityDoctorService {
         ];
       }
 
+      if (hasToken) {
+        final issue = await _signInHealthIssue(store, profile);
+        if (issue != null) issues.add(issue);
+      }
+
       if (hasToken && !cliInstalled) {
         issues.add(DoctorIssue(
           category: DoctorCategory.credentialHelperNotInstalled,
@@ -226,5 +237,53 @@ class IdentityDoctorService {
       }
     }
     return issues;
+  }
+
+  /// Asks GitHub whether [profile]'s saved sign-in still works. Says
+  /// nothing when GitHub can't be reached: a false alarm would send people
+  /// to sign in again for nothing, and each new sign-in can cancel an old
+  /// one (GitHub keeps 10 per account).
+  Future<DoctorIssue?> _signInHealthIssue(TokenStore store, Profile profile) async {
+    final checker = signInChecker;
+    if (checker == null) return null;
+    final String? token;
+    try {
+      token = await store.readToken(profile.id);
+    } on KeychainException {
+      return null;
+    }
+    if (token == null || token.isEmpty) return null;
+    final result = await checker.check(token);
+    switch (result.health) {
+      case SignInHealth.rejected:
+        return DoctorIssue(
+          category: DoctorCategory.signInRejected,
+          severity: Severity.blocking,
+          message: "\"${profile.label}\"'s GitHub sign-in has stopped working: "
+              'GitHub no longer accepts it. It may have been cancelled on '
+              'GitHub (this happens after signing in to Gita many times, since '
+              'GitHub keeps only the 10 newest). Pushes from its projects will '
+              'fail or ask for a password until it is signed in again. Open '
+              'Profiles, edit "${profile.label}" and press "Sign in with GitHub".',
+          profileId: profile.id,
+        );
+      case SignInHealth.working:
+        final expected = profile.githubLogin;
+        final actual = result.login!;
+        if (expected == null || expected.toLowerCase() == actual.toLowerCase()) {
+          return null;
+        }
+        return DoctorIssue(
+          category: DoctorCategory.signInWrongAccount,
+          severity: Severity.warning,
+          message: '"${profile.label}" should push as @$expected, but its saved '
+              'sign-in belongs to @$actual. Pushes from its projects will use '
+              '@$actual. Sign it in again as @$expected: open Profiles, edit '
+              '"${profile.label}" and press "Sign in with GitHub".',
+          profileId: profile.id,
+        );
+      case SignInHealth.unknown:
+        return null;
+    }
   }
 }

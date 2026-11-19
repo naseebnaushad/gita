@@ -28,6 +28,7 @@ import 'services/path_setup.dart';
 import 'services/platform_paths.dart';
 import 'services/secure_token_service.dart';
 import 'services/setup_service.dart';
+import 'services/sign_in_checker.dart';
 import 'services/ssh_config_service.dart';
 import 'services/ssh_key_service.dart';
 import 'storage/repositories.dart';
@@ -121,11 +122,31 @@ Future<CliInstallResult> _installCli(Ref ref) async {
 
 final gpgServiceProvider = Provider((ref) => const GpgService());
 
+/// Asks GitHub whether saved sign-ins still work (for the Doctor and the
+/// profile dialog).
+final signInCheckerProvider = Provider<SignInChecker?>((ref) => GitHubSignInChecker());
+
+/// What GitHub says about one profile's saved sign-in (for the Profiles
+/// cards). Unknown when there's no sign-in, no checker, or GitHub can't be
+/// asked, so being offline never shows a problem.
+final signInHealthProvider = FutureProvider.autoDispose.family<SignInHealth, String>((ref, profileId) async {
+  final checker = ref.watch(signInCheckerProvider);
+  if (checker == null) return SignInHealth.unknown;
+  try {
+    final token = await ref.watch(secureTokenServiceProvider).readToken(profileId);
+    if (token == null || token.isEmpty) return SignInHealth.unknown;
+    return (await checker.check(token)).health;
+  } catch (_) {
+    return SignInHealth.unknown;
+  }
+});
+
 final identityDoctorServiceProvider = Provider(
   (ref) => IdentityDoctorService(
     gpgService: ref.watch(gpgServiceProvider),
     paths: ref.watch(platformPathsProvider),
     tokenStore: ref.watch(secureTokenServiceProvider).store,
+    signInChecker: ref.watch(signInCheckerProvider),
   ),
 );
 

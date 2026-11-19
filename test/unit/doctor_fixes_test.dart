@@ -57,6 +57,8 @@ void main() {
       expect(fixesFor(issue(DoctorCategory.orphanedSshKeyReference)), [DoctorFix.unlinkSshKey]);
       expect(fixesFor(issue(DoctorCategory.orphanedRuleProfile)), [DoctorFix.deleteRule]);
       expect(fixesFor(issue(DoctorCategory.missingPushToken)), [DoctorFix.signIn]);
+      expect(fixesFor(issue(DoctorCategory.signInRejected)), [DoctorFix.signIn]);
+      expect(fixesFor(issue(DoctorCategory.signInWrongAccount)), [DoctorFix.signIn]);
       expect(fixesFor(issue(DoctorCategory.credentialHelperNotInstalled)), [DoctorFix.installCli]);
       expect(fixesFor(issue(DoctorCategory.keychainUnavailable)), isEmpty);
     });

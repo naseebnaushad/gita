@@ -132,6 +132,7 @@ extension _OnboardCommand on GitaCli {
     deviceFlow: deviceFlow,
     openBrowser: openBrowser,
     runProcess: runProcess,
+    signInChecker: signInChecker,
     runInteractive: runInteractive,
     environment: environment,
     pathSetup: pathSetup,
@@ -574,7 +575,13 @@ extension _OnboardCommand on GitaCli {
         (await ProfileRepository(paths: paths).getAll()).where((x) => x.id == id).firstOrNull;
     final profile = await load();
     final login = profile?.githubLogin;
-    final signedIn = !dry && profile != null && await tokenStore.hasToken(id);
+    var signedIn = !dry && profile != null && await tokenStore.hasToken(id);
+    // A saved sign-in GitHub has cancelled is no sign-in: say so, then
+    // sign in again below instead of failing later at the first clone.
+    if (signedIn && await _signInHealth(id) == SignInHealth.rejected) {
+      r.warn('"$label"\'s GitHub sign-in has stopped working (GitHub cancelled it). Signing it in again.');
+      signedIn = false;
+    }
     if (signedIn && login != null) {
       if (otherLogins.contains(login.toLowerCase())) {
         r.warn('"$label" is signed in as @$login, which another account also uses. Sign it in as your $email account.');
@@ -616,8 +623,25 @@ extension _OnboardCommand on GitaCli {
     ]);
   }
 
+  /// What GitHub says about profile [id]'s saved sign-in; unknown when
+  /// there's no checker, no sign-in, or GitHub can't be asked.
+  Future<SignInHealth> _signInHealth(String id) async {
+    final checker = signInChecker;
+    if (checker == null) return SignInHealth.unknown;
+    try {
+      final token = await tokenStore.readToken(id);
+      if (token == null || token.isEmpty) return SignInHealth.unknown;
+      return (await checker.check(token)).health;
+    } catch (_) {
+      return SignInHealth.unknown;
+    }
+  }
+
+  // Onboard has already decided a new sign-in is needed (none, cancelled,
+  // wrong account, or a retry the person asked for), so --force: the plain
+  // command would skip a sign-in that still works.
   Future<void> _signInOnce(Reporter r, String id, String label) async {
-    final code = await _child().run(['sign-in', '--profile', id]);
+    final code = await _child().run(['sign-in', '--profile', id, '--force']);
     if (code != ExitCodes.ok) r.warn('Signing "$label" in did not finish.');
   }
 
