@@ -367,6 +367,13 @@ class _RuleCard extends StatelessWidget {
                   label: const Text('Unknown profile'),
                   backgroundColor: scheme.errorContainer,
                 ),
+              if (rule.overridesAccountRules) ...[
+                const SizedBox(width: 12),
+                Tooltip(
+                  message: 'Wins over organization rules for projects in this folder',
+                  child: Icon(Icons.swap_vert, size: 16, color: scheme.onSurfaceVariant),
+                ),
+              ],
               if (rule.priority != 0 && !rule.isAccountRule) ...[
                 const SizedBox(width: 12),
                 Container(
@@ -417,11 +424,13 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
   late final TextEditingController _priorityController;
   String? _profileId;
   late bool _byAccount;
+  late bool _overridesAccountRules;
 
   @override
   void initState() {
     super.initState();
     final e = widget.existing;
+    _overridesAccountRules = e?.overridesAccountRules ?? false;
     _byAccount = e?.isAccountRule ?? false;
     _pathController = TextEditingController(text: e?.pathPattern ?? '');
     _ownerController = TextEditingController(
@@ -540,7 +549,21 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
                 onChanged: (v) => setState(() => _profileId = v),
               ),
               if (!_byAccount) ...[
-                const SizedBox(height: 14),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: _overridesAccountRules,
+                  onChanged: (v) =>
+                      setState(() => _overridesAccountRules = v ?? false),
+                  title: const Text('Also use it for organization projects here'),
+                  subtitle: const Text(
+                    'Use this when you have two accounts in one GitHub '
+                    'organization: the organization rule is the default, and '
+                    'projects in this folder use this profile instead.',
+                  ),
+                ),
+                const SizedBox(height: 8),
                 TextFormField(
                   controller: _priorityController,
                   decoration: const InputDecoration(
@@ -583,6 +606,7 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
             pathPattern: resolveRepoPath(_pathController.text.trim()),
             profileId: _profileId!,
             priority: int.tryParse(_priorityController.text.trim()) ?? 0,
+            overridesAccountRules: _overridesAccountRules,
           );
     await ref.read(repoRulesProvider.notifier).upsert(rule);
     if (mounted) Navigator.pop(context);

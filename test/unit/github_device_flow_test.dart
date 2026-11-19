@@ -19,6 +19,22 @@ void main() {
 
   setUp(() => waits = []);
 
+  test('the classic token link carries every scope Gita needs', () {
+    final url = classicTokenUrl();
+    expect(url.host, 'github.com');
+    expect(url.queryParameters['scopes']!.split(','), GitHubDeviceFlow.scopes);
+  });
+
+  test('tells classic, fine-grained and other tokens apart', () {
+    expect(tokenKindOf('ghp_abc'), TokenKind.classic);
+    expect(tokenKindOf(' github_pat_abc '), TokenKind.fineGrained);
+    expect(tokenKindOf('gho_abc'), TokenKind.oauth);
+    expect(tokenKindOf('abc'), TokenKind.unknown);
+    expect(tokenAdvice('ghp_abc'), contains('Configure SSO'));
+    expect(tokenAdvice('github_pat_abc'), contains('resource owner'));
+    expect(tokenAdvice('abc'), isNull);
+  });
+
   test('start asks for the push scopes and returns the code to show', () async {
     final github = FakeGitHub(tokenAnswers: []);
     final code = await flowWith(github).start();

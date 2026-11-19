@@ -329,7 +329,12 @@ extension _ManageCommands on GitaCli {
       final path = _folderPath(folder);
       final existing = _folderRule(rules, path);
       if (existing != null && existing.profileId != profile.id) replaced = existing.profileId;
-      rule = RepoRule(id: existing?.id ?? const Uuid().v4(), pathPattern: path, profileId: profile.id);
+      rule = RepoRule(
+        id: existing?.id ?? const Uuid().v4(),
+        pathPattern: path,
+        profileId: profile.id,
+        overridesAccountRules: command['over-org'] as bool,
+      );
     } else {
       final host = (_opt(command, 'host') ?? RepoRule.defaultHost).toLowerCase();
       final name = owner!.replaceAll(RegExp(r'^@|/+$'), '');

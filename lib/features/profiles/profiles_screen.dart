@@ -11,6 +11,7 @@ import '../../core/services/github_device_flow.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/initials_avatar.dart';
 import '../../widgets/screen_header.dart';
+import '../../core/services/browser.dart';
 import 'github_sign_in_dialog.dart';
 import '../setup/setup_wizard.dart';
 import 'ssh_setup_dialog.dart';
@@ -228,6 +229,8 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
   bool _hadStoredToken = false;
   bool _obscureToken = true;
   bool _showTokenField = false;
+  bool _verifying = false;
+  String? _tokenError;
 
   /// The GitHub account the token belongs to, when it came from signing in.
   String? _githubLogin;
@@ -376,18 +379,69 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     final flow = ref.watch(gitHubDeviceFlowProvider);
     final signedIn = _githubLogin != null && _tokenController.text.trim().isNotEmpty;
 
-    final tokenField = TextFormField(
-      controller: _tokenController,
-      obscureText: _obscureToken,
-      onChanged: (_) => setState(() => _githubLogin = null),
-      decoration: InputDecoration(
-        labelText: 'GitHub access token (for HTTPS pushes)',
-        helperText: 'Stored in the OS keychain, never in plain files.',
-        suffixIcon: IconButton(
-          icon: Icon(_obscureToken ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-          onPressed: () => setState(() => _obscureToken = !_obscureToken),
+    final tokenText = _tokenController.text.trim();
+    final advice = tokenAdvice(tokenText);
+    final tokenField = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextFormField(
+          controller: _tokenController,
+          obscureText: _obscureToken,
+          onChanged: (_) => setState(() {
+            _githubLogin = null;
+            _tokenError = null;
+          }),
+          decoration: InputDecoration(
+            labelText: 'GitHub access token (classic or fine-grained)',
+            helperText: 'Stored in the OS keychain, never in plain files. '
+                'A token you make yourself keeps working until its own expiry.',
+            helperMaxLines: 2,
+            errorText: _tokenError,
+            errorMaxLines: 3,
+            suffixIcon: IconButton(
+              icon: Icon(_obscureToken ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+              onPressed: () => setState(() => _obscureToken = !_obscureToken),
+            ),
+          ),
         ),
-      ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => openInBrowser(classicTokenUrl()),
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('Make a classic token on GitHub (scopes pre-selected)'),
+          ),
+        ),
+        if (advice != null) ...[
+          const SizedBox(height: 6),
+          Text(advice,
+              style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
+        ],
+        if (flow == null && signedIn) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.check_circle, size: 18, color: scheme.secondary),
+              const SizedBox(width: 8),
+              Text('Token works: signed in as @$_githubLogin'),
+            ],
+          ),
+        ],
+        if (tokenText.isNotEmpty && !signedIn) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: _verifying ? null : _verifyToken,
+              icon: _verifying
+                  ? const SizedBox.square(
+                      dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.verified_user_outlined, size: 18),
+              label: const Text('Check token'),
+            ),
+          ),
+        ],
+      ],
     );
 
     if (flow == null) return tokenField;
@@ -438,7 +492,7 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
               alignment: Alignment.centerLeft,
               child: TextButton(
                 onPressed: () => setState(() => _showTokenField = true),
-                child: const Text('Paste a token instead'),
+                child: const Text('Use an access token instead'),
               ),
             ),
         ],
@@ -542,8 +596,52 @@ class _ProfileEditorDialogState extends ConsumerState<_ProfileEditorDialog> {
     });
   }
 
+  /// Asks GitHub who the pasted token belongs to. Returns false, with the
+  /// reason shown under the field, when GitHub refuses it.
+  Future<bool> _verifyToken() async {
+    final token = _tokenController.text.trim();
+    if (token.isEmpty) return true;
+    setState(() {
+      _verifying = true;
+      _tokenError = null;
+    });
+    try {
+      final flow = ref.read(gitHubDeviceFlowProvider) ?? GitHubDeviceFlow(clientId: '');
+      final account = await flow.fetchAccount(token);
+      if (!mounted) return false;
+      setState(() {
+        _githubLogin = account.login;
+        final name = account.name?.trim();
+        if (_nameController.text.trim().isEmpty) {
+          _nameController.text = (name == null || name.isEmpty) ? account.login : name;
+        }
+        if (_emailController.text.trim().isEmpty && account.email != null) {
+          _emailController.text = account.email!;
+        }
+        if (_labelController.text.trim().isEmpty) _labelController.text = account.login;
+      });
+      return true;
+    } on DeviceFlowException catch (e) {
+      if (!mounted) return false;
+      // No connection is not the token's fault: let the person save anyway.
+      if (e.error == DeviceFlowError.network) {
+        setState(() => _tokenError = e.message);
+        return true;
+      }
+      setState(() => _tokenError = e.message);
+      return false;
+    } finally {
+      if (mounted) setState(() => _verifying = false);
+    }
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_tokenController.text.trim().isNotEmpty &&
+        _githubLogin == null &&
+        !await _verifyToken()) {
+      return;
+    }
     final existing = widget.existing;
     final profile = Profile(
       id: existing?.id ?? const Uuid().v4(),
