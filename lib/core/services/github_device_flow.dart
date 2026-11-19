@@ -204,6 +204,41 @@ class GitHubAccount {
   final String? email;
 }
 
+/// GitHub's "new classic token" page with the scopes Gita needs already
+/// ticked, so nobody has to pick them by hand. Fine-grained tokens can't be
+/// pre-filled this way.
+Uri classicTokenUrl() => Uri.https('github.com', '/settings/tokens/new', {
+      'description': 'Gita',
+      'scopes': GitHubDeviceFlow.scopes.join(','),
+    });
+
+/// What kind of GitHub token a pasted string looks like, from its prefix.
+enum TokenKind { classic, fineGrained, oauth, unknown }
+
+TokenKind tokenKindOf(String token) {
+  final t = token.trim();
+  if (t.startsWith('github_pat_')) return TokenKind.fineGrained;
+  if (t.startsWith('ghp_')) return TokenKind.classic;
+  if (t.startsWith('gho_') || t.startsWith('ghu_')) return TokenKind.oauth;
+  return TokenKind.unknown;
+}
+
+/// A short note on what to check for [token], or null if there is nothing
+/// to add. Fine-grained tokens only see the organization chosen when they
+/// were made, and both kinds need single sign-on approval for an
+/// organization that uses it.
+String? tokenAdvice(String token) => switch (tokenKindOf(token)) {
+      TokenKind.fineGrained =>
+        'Fine-grained token: it must have the organization as its resource '
+            'owner, access to the projects you push, and "Contents: Read and '
+            'write". Its expiry date is the day you will need a new one.',
+      TokenKind.classic =>
+        'Classic token: it needs the "repo" scope (and "workflow" to push '
+            'workflow files). If the organization uses single sign-on, press '
+            '"Configure SSO" next to the token on github.com and authorize it.',
+      _ => null,
+    };
+
 enum DeviceFlowError {
   cancelled,
   expired,

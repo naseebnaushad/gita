@@ -196,7 +196,10 @@ class GitaCli {
           ..addOption('profile', help: 'Name or id of the profile.')
           ..addOption('folder', help: 'Folder whose projects use the profile.')
           ..addOption('owner', help: 'GitHub account or organization whose projects use the profile.')
-          ..addOption('host', help: 'Git host for --owner (default github.com).'),
+          ..addOption('host', help: 'Git host for --owner (default github.com).')
+          ..addFlag('over-org',
+              negatable: false,
+              help: 'With --folder: also win over organization rules, for a second account in the same organization.'),
       )
       ..addCommand(
         'clone',
@@ -358,6 +361,9 @@ Commands:
   rule add --profile <name or id> --owner <account or organization>
                    Make projects in a folder, or from a GitHub account
                    or organization (wherever they are), use a profile.
+  rule add --profile <name or id> --folder <folder> --over-org
+                   Same, and also for that organization's projects in the
+                   folder: use it for a second account in one organization.
   rule remove <rule id, folder, or host/owner>
                    Take a rule out again.
   guard install [folder]

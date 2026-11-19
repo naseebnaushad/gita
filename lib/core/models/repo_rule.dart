@@ -10,7 +10,10 @@ import '../services/remote_url.dart';
 ///   folder is. [pathPattern] is empty for these.
 ///
 /// When both apply, an account rule beats a folder rule, and a rule for
-/// one exact project folder beats both.
+/// one exact project folder beats both. A folder rule with
+/// [overridesAccountRules] set beats account rules too, which is how two
+/// profiles can share one organization: the account rule is the default,
+/// and a folder says "here I use my other account".
 class RepoRule {
   final String id;
   final String pathPattern;
@@ -23,6 +26,11 @@ class RepoRule {
   /// The host for an account rule: `github.com` unless set.
   final String host;
 
+  /// For a folder rule: also wins over account rules for projects in the
+  /// folder, so a second account can be used for one organization's
+  /// projects kept there.
+  final bool overridesAccountRules;
+
   static const defaultHost = 'github.com';
 
   const RepoRule({
@@ -32,6 +40,7 @@ class RepoRule {
     this.priority = 0,
     this.githubOwner,
     this.host = defaultHost,
+    this.overridesAccountRules = false,
   });
 
   /// Every project from `host/owner/...` uses [profileId].
@@ -69,6 +78,7 @@ class RepoRule {
       priority: json['priority'] as int? ?? 0,
       githubOwner: json['githubOwner'] as String?,
       host: json['host'] as String? ?? defaultHost,
+      overridesAccountRules: json['overridesAccountRules'] as bool? ?? false,
     );
   }
 
@@ -79,6 +89,7 @@ class RepoRule {
     'priority': priority,
     if (githubOwner != null) 'githubOwner': githubOwner,
     if (host != defaultHost) 'host': host,
+    if (overridesAccountRules) 'overridesAccountRules': true,
   };
 
   /// True when [remoteUrl] is on this account rule's host and owner.
@@ -91,11 +102,13 @@ class RepoRule {
   }
 
   /// The order Gita writes rules into ~/.gitconfig, where the last match
-  /// wins: folder rules (shortest first), then account rules, then rules
-  /// for single projects. [bestMatchFor] follows the same order.
+  /// wins: folder rules (shortest first), then account rules, then folder
+  /// rules that override them, then rules for single projects.
+  /// [bestMatchFor] follows the same order.
   static List<RepoRule> inEmitOrder(List<RepoRule> rules) {
     int len(RepoRule r) => _slashes(r.pathPattern).length;
     final folders = <RepoRule>[];
+    final overriding = <RepoRule>[];
     final accounts = <RepoRule>[];
     final projects = <RepoRule>[];
     for (final r in rules) {
@@ -105,11 +118,14 @@ class RepoRule {
         continue;
       } else if (r.isProjectRule) {
         projects.add(r);
+      } else if (r.overridesAccountRules) {
+        overriding.add(r);
       } else {
         folders.add(r);
       }
     }
     folders.sort((a, b) => len(a).compareTo(len(b)));
+    overriding.sort((a, b) => len(a).compareTo(len(b)));
     projects.sort((a, b) => len(a).compareTo(len(b)));
     accounts.sort((a, b) {
       final c = a.githubOwner!.toLowerCase().compareTo(
@@ -117,7 +133,7 @@ class RepoRule {
       );
       return c != 0 ? c : a.id.compareTo(b.id);
     });
-    return [...folders, ...accounts, ...projects];
+    return [...folders, ...accounts, ...overriding, ...projects];
   }
 
   /// Which rule decides the profile for the project at [repoPath].
@@ -148,6 +164,21 @@ class RepoRule {
     );
     if (exact.isNotEmpty) {
       return exact.reduce((a, b) => b.priority > a.priority ? b : a);
+    }
+
+    final overriding = folderRules.where(
+      (r) =>
+          r.overridesAccountRules &&
+          normalizedRepo.startsWith(_withTrailingSlash(_slashes(r.pathPattern))),
+    ).toList();
+    if (overriding.isNotEmpty) {
+      overriding.sort((a, b) {
+        final c = _slashes(b.pathPattern).length.compareTo(
+          _slashes(a.pathPattern).length,
+        );
+        return c != 0 ? c : b.priority.compareTo(a.priority);
+      });
+      return overriding.first;
     }
 
     if (remoteUrls.isNotEmpty) {

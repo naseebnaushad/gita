@@ -34,4 +34,46 @@ void main() {
     final match = RepoRule.bestMatchFor('C:/Users/me/work/special', rules);
     expect(match?.id, 'child');
   });
+
+  group('a second account in one organization', () {
+    final org = RepoRule.account(id: 'org', owner: 'acme', profileId: 'main');
+    const url = 'https://github.com/acme/api.git';
+
+    test('an organization rule beats an ordinary folder rule', () {
+      final folder = RepoRule(id: 'f', pathPattern: '/w/acme', profileId: 'other');
+      final m = RepoRule.bestMatchFor('/w/acme/api', [org, folder], remoteUrls: [url]);
+      expect(m?.id, 'org');
+    });
+
+    test('a folder rule marked to override beats the organization rule', () {
+      final folder = RepoRule(
+        id: 'f',
+        pathPattern: '/w/acme',
+        profileId: 'other',
+        overridesAccountRules: true,
+      );
+      final m = RepoRule.bestMatchFor('/w/acme/api', [org, folder], remoteUrls: [url]);
+      expect(m?.id, 'f');
+      // Outside the folder the organization rule is still the default.
+      final outside = RepoRule.bestMatchFor('/w/else/api', [org, folder], remoteUrls: [url]);
+      expect(outside?.id, 'org');
+    });
+
+    test('is written after account rules, before single-project rules', () {
+      final folder = RepoRule(
+        id: 'f', pathPattern: '/w/acme', profileId: 'other', overridesAccountRules: true);
+      final plain = RepoRule(id: 'p', pathPattern: '/w', profileId: 'main');
+      final ids = RepoRule.inEmitOrder([folder, org, plain]).map((r) => r.id).toList();
+      expect(ids, ['p', 'org', 'f']);
+    });
+
+    test('survives a save and load', () {
+      final folder = RepoRule(
+        id: 'f', pathPattern: '/w/acme', profileId: 'other', overridesAccountRules: true);
+      expect(RepoRule.fromJson(folder.toJson()).overridesAccountRules, isTrue);
+      expect(RepoRule.fromJson(plainJson).overridesAccountRules, isFalse);
+    });
+  });
 }
+
+final plainJson = {'id': 'x', 'pathPattern': '/w', 'profileId': 'p'};
