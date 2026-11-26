@@ -1,6 +1,7 @@
-# Tests every pull request, and builds Gita for Windows, macOS and Linux.
+# Tests every pull request, and builds Gita for Windows, macOS and Linux
+# (x64 and arm64).
 #
-# - Pull requests and pushes to master: tests + the three builds. The
+# - Pull requests and pushes to master: tests + all the builds. The
 #   built apps can be downloaded from the run's "Artifacts" section.
 # - Releases: see release.yml, which calls this workflow on a v* tag.
 # - "Run workflow" on the Actions tab: the same as a pull request.
@@ -85,15 +86,33 @@ jobs:
           - name: Linux
             os: ubuntu-latest
             target: linux
+            arch: x64
+            artifact: linux
             asset: gita-linux-x64.tar.gz
+          - name: Linux arm64
+            os: ubuntu-24.04-arm
+            target: linux
+            arch: arm64
+            artifact: linux-arm64
+            asset: gita-linux-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
+        if: matrix.arch != 'arm64'
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
+      # Flutter publishes no Linux arm64 SDK download, so flutter-action
+      # can't install it there. Use the release tag from Flutter's git repo;
+      # the first `flutter` run downloads its Dart SDK and engine for arm64.
+      - name: Flutter (Linux arm64)
+        if: matrix.arch == 'arm64'
+        run: |
+          git clone --depth 1 -b "$FLUTTER_VERSION" https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/flutter/bin/flutter" --version
 
       - name: Linux build tools
         if: matrix.target == 'linux'
@@ -160,7 +179,7 @@ jobs:
       - name: Package (Linux)
         if: matrix.target == 'linux'
         run: |
-          bundle="build/linux/x64/release/bundle"
+          bundle="build/linux/${{ matrix.arch }}/release/bundle"
           "$bundle/cli/bin/gita" --version
           scripts/smoke_cli.sh "$bundle/cli/bin/gita"
           mkdir -p dist
@@ -168,8 +187,8 @@ jobs:
           # .deb and .rpm
           sudo apt-get install -y rpm ruby
           sudo gem install --no-document fpm
-          packaging/linux/package.sh deb "$bundle" "${{ steps.ver.outputs.version }}" dist
-          packaging/linux/package.sh rpm "$bundle" "${{ steps.ver.outputs.version }}" dist
+          packaging/linux/package.sh deb "$bundle" "${{ steps.ver.outputs.version }}" dist ${{ matrix.arch }}
+          packaging/linux/package.sh rpm "$bundle" "${{ steps.ver.outputs.version }}" dist ${{ matrix.arch }}
           # The .deb installs and the installed command runs.
           sudo apt-get install -y ./dist/*.deb
           gita --version
@@ -177,7 +196,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
+          name: ${{ matrix.artifact || matrix.target }}
           path: dist/*
           if-no-files-found: error
 

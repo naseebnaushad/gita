@@ -1,7 +1,7 @@
 # Releases Gita. Push a tag like v1.2.0 and this workflow:
 #   1. checks the tag matches the version in pubspec.yaml,
 #   2. runs the tests and builds for Windows, macOS and Linux (build.yml),
-#   3. creates a GitHub release with the three downloads attached.
+#   3. creates a GitHub release with the downloads attached.
 #
 #   git tag v1.2.0 && git push origin v1.2.0
 #
