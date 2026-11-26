@@ -12,6 +12,7 @@ Engineering documents for Gita, per version. User-facing docs are in the
 | 1.2.0 | [Change Request (dashboard remove)](v1.2.0/alpha/v1.2.0%20-%20Change%20Request%20(dashboard%20remove).md) — Draft |
 | 1.2.0 | [Change Request (sign-in health)](v1.2.0/alpha/v1.2.0%20-%20Change%20Request%20(sign-in%20health).md) |
 | 1.2.0 | [Change notes in this release](v1.2.0/release/change-notes/) (sign-in health, multi-account and tokens, onboard repair, lifecycle docs) |
+| 1.2.1 | [Change notes in this release](v1.2.1/release/change-notes/) (arm64 Linux build) |
 
 Change notes not yet in a version (compiled by `/promote`) are in
 [unreleased/](unreleased/): one per branch.

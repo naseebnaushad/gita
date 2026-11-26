@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 (2026-11-26)
+
+- Gita is now built for arm64 Linux. Each release has
+  `gita-linux-arm64.tar.gz`, an arm64 `.deb` and an aarch64 `.rpm`, listed
+  in `SHA256SUMS` with the other downloads. No change to the app itself.
+
 ## 1.2.0 (2026-11-19)
 
 - Gita now notices when GitHub has cancelled a sign-in. GitHub keeps only
