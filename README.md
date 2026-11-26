@@ -66,7 +66,8 @@ push where the effective identity doesn't match what's expected for that repo.
 
 **Using Gita:** download it from the
 [Releases](https://github.com/naseebnaushad/gita/releases) page
-(`gita-windows-x64.zip`, `gita-macos.zip` or `gita-linux-x64.tar.gz`),
+(`gita-windows-x64.zip`, `gita-macos.zip`, `gita-linux-x64.tar.gz` or
+`gita-linux-arm64.tar.gz`),
 unpack it and open `gita`. Rolling it out at a company? See
 [docs/company-rollout.md](docs/company-rollout.md).
 
